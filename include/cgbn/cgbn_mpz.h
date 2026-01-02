@@ -214,6 +214,9 @@ class cgbn_env_t {
   template<uint32_t numbits> __host__ void rotate_left(cgbn_t &r, const cgbn_t &a) const;
   template<uint32_t numbits> __host__ void rotate_right(cgbn_t &r, const cgbn_t &a) const;
 
+  template<uint32_t numbits>
+  __host__ int32_t shift_right_extend_signed(cgbn_t &r, const cgbn_t &a, const int32_t sign) const;
+
   /* bit counting */
   __host__ uint32_t   pop_count(const cgbn_t &a) const;
   __host__ uint32_t   clz(const cgbn_t &a) const;

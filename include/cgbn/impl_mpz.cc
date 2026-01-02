@@ -634,6 +634,22 @@ void cgbn_env_t<context_t, bits, convergence>::rotate_right(cgbn_t &r, const cgb
   rotate_right(r, a, numbits);
 }
 
+template<class context_t, uint32_t bits, cgbn_convergence_t convergence> template<uint32_t numbits>
+int32_t cgbn_env_t<context_t, bits, convergence>::shift_right_extend_signed(cgbn_t &r, const cgbn_t &a, int32_t sign) const {
+  mpz_t    left, right;
+  
+  mpz_init(left);
+  mpz_init(right);
+  mpz_set_ui(left, uint32_t(sign) << (32-numbits));
+  mpz_mul_2exp(left, left, bits - 32);
+  mpz_fdiv_q_2exp(right, a._z, numbits);
+  mpz_ior(r._z, left, right);
+  mpz_clear(left);
+  mpz_clear(right);
+
+  return sign >> numbits;
+}
+
 /* bit counting */
 template<class context_t, uint32_t bits, cgbn_convergence_t convergence>
 uint32_t cgbn_env_t<context_t, bits, convergence>::pop_count(const cgbn_t &a) const {

@@ -200,6 +200,9 @@ class cgbn_env_t {
   __device__ __forceinline__ void       rotate_left(cgbn_t &r, const cgbn_t &a, const uint32_t numbits) const;
   __device__ __forceinline__ void       rotate_right(cgbn_t &r, const cgbn_t &a, const uint32_t numbits) const;
 
+  template<uint32_t numbits>
+  __device__ __forceinline__ int32_t    shift_right_extend_signed(cgbn_t &r, const cgbn_t &a, const int32_t sign) const;
+
   /* bit counting */
   __device__ __forceinline__ uint32_t   pop_count(const cgbn_t &a) const;
   __device__ __forceinline__ uint32_t   clz(const cgbn_t &a) const;

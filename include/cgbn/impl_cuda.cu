@@ -797,6 +797,12 @@ __device__ __forceinline__ void cgbn_env_t<context_t, bits, syncable>::rotate_ri
   cgbn::core_t<cgbn_env_t>::rotate_right(r._limbs, a._limbs, numbits);
 }
 
+template<class context_t, uint32_t bits, cgbn_syncable_t syncable> template<uint32_t numbits>
+__device__ __forceinline__ int32_t cgbn_env_t<context_t, bits, syncable>::shift_right_extend_signed(cgbn_t &r, const cgbn_t &a, const int32_t sign) const {
+  static_assert(numbits <= 31, "numbits must be <= 31");
+  return cgbn::core_t<cgbn_env_t>::shift_right_extend_signed<numbits>(r._limbs, a._limbs, sign);
+}
+
 #if 0
 template<class context_t, uint32_t bits, cgbn_syncable_t syncable> template<uint32_t numbits>
 __device__ __forceinline__ void cgbn_env_t<context_t, bits, syncable>::shift_left(cgbn_t &r, const cgbn_t &a) const {

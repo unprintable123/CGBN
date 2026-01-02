@@ -275,6 +275,33 @@ class core_t {
     dispatch_shift_rotate_t<core_t, PADDING>::rotate_right(r, a, numbits);
   }
 
+  template<uint32_t numbits>
+  __device__ __forceinline__ static int32_t  shift_right_extend_signed(uint32_t r[LIMBS], const uint32_t a[LIMBS], const int32_t sign) {
+    uint32_t group_thread=threadIdx.x & TPI-1;
+    int32_t  group_base=group_thread*LIMBS;
+    int32_t  delta = group_base - (BITS-numbits)/32;
+    int32_t  last_index = BITS/32 - group_base - 1;
+
+    drotate_right<TPI, LIMBS, MAX_ROTATION>(core_t::sync_mask(), r, a, numbits);
+    if (PADDING){
+    #pragma unroll
+    for(int32_t index=0;index<LIMBS;index++)
+      if(delta>index)
+        r[index]=0;
+
+    if ((last_index >= 0) && (last_index < LIMBS)) {
+      r[last_index] = uint32_t(sign) << (32-numbits)  | (r[last_index] & ((1<<(32-numbits))-1));
+    }
+    } else {
+      if (group_thread == TPI - 1) {
+        r[LIMBS-1] = uint32_t(sign) << (32-numbits)  | (r[last_index] & ((1<<(32-numbits))-1));
+      }
+    }
+
+
+    return sign >> numbits;
+  }
+
   /* BIT COUNTING AND THREAD COUNTING ROUTINES */
   __device__ __forceinline__ static uint32_t pop_count(const uint32_t a[LIMBS]);
   __device__ __forceinline__ static uint32_t clz(const uint32_t a[LIMBS]);

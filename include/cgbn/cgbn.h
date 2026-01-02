@@ -348,6 +348,11 @@ __host__ __device__ __forceinline__ void cgbn_rotate_right(env_t env, typename e
   env.rotate_right(r, a, numbits);
 }
 
+template<uint32_t numbits, class env_t>
+__host__ __device__ __forceinline__ int32_t cgbn_shift_right_extend_signed(env_t env, typename env_t::cgbn_t &r, const typename env_t::cgbn_t &a, const int32_t sign) {
+  return env.template shift_right_extend_signed<numbits>(r, a, sign);
+}
+
 
 /* bit counting */
 template<class env_t>

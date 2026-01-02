@@ -85,6 +85,7 @@ IN THE SOFTWARE.
 #include "shift_right.h"
 #include "rotate_left.h"
 #include "rotate_right.h"
+#include "shift_right_extend_signed.h"
 #include "pop_count.h"
 #include "clz.h"
 #include "ctz.h"

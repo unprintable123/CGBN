@@ -22,6 +22,8 @@ IN THE SOFTWARE.
 
 ***/
 
+#pragma once
+
 namespace cgbn {
 
 /* defines */

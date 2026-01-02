@@ -450,6 +450,12 @@ TYPED_TEST_P(CGBN4, shift_right_1) {
   EXPECT_TRUE(result);
 }
 
+TYPED_TEST_P(CGBN2, shift_right_extend_signed_1) {
+  bool result=run_test<test_shift_right_extend_signed_1, TestFixture>(LONG_TEST);
+  
+  EXPECT_TRUE(result);
+}
+
 TYPED_TEST_P(CGBN4, rotate_left_1) {
   bool result=run_test<test_rotate_left_1, TestFixture>(LONG_TEST);
   
@@ -591,7 +597,7 @@ REGISTER_TYPED_TEST_SUITE_P(CGBN1,
 REGISTER_TYPED_TEST_SUITE_P(CGBN2,
  get_ui32_set_ui32_1, add_ui32_1, sub_ui32_1, mul_ui32_1, div_ui32_1, rem_ui32_1,
  equals_ui32_1, equals_ui32_2, equals_ui32_3, equals_ui32_4, compare_ui32_1, compare_ui32_2,
- extract_bits_ui32_1, insert_bits_ui32_1, binary_inverse_ui32_1, gcd_ui32_1
+ extract_bits_ui32_1, insert_bits_ui32_1, binary_inverse_ui32_1, gcd_ui32_1, shift_right_extend_signed_1
 );
 REGISTER_TYPED_TEST_SUITE_P(CGBN3,
  mul_wide_1, sqr_wide_1, div_wide_1, rem_wide_1, div_rem_wide_1, sqrt_wide_1, sqrt_rem_wide_1

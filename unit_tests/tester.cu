@@ -38,7 +38,7 @@ typedef enum test_enum {
   
   test_get_ui32_set_ui32_1, test_add_ui32_1, test_sub_ui32_1, test_mul_ui32_1, test_div_ui32_1, test_rem_ui32_1, 
   test_equals_ui32_1, test_equals_ui32_2, test_equals_ui32_3, test_equals_ui32_4, test_compare_ui32_1, test_compare_ui32_2,
-  test_extract_bits_ui32_1, test_insert_bits_ui32_1, test_binary_inverse_ui32_1, test_gcd_ui32_1,
+  test_extract_bits_ui32_1, test_insert_bits_ui32_1, test_binary_inverse_ui32_1, test_gcd_ui32_1, test_shift_right_extend_signed_1,
   
   test_mul_wide_1, test_sqr_wide_1, test_div_wide_1, test_rem_wide_1, test_div_rem_wide_1, test_sqrt_wide_1, test_sqrt_rem_wide_1,
   
