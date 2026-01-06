@@ -41,7 +41,7 @@ struct Uint128Hasher {
     }
 };
 
-void store_low_256_bits(mpz_t src, uint128_t& dest) {
+void store_low_256_bits(mpz_t &src, uint128_t& dest, bool sgn=false) {
     THREAD_LOCAL_MPZ_WORKSPACE(low_bits);
 
     mpz_tdiv_r_2exp(low_bits, src, 128); 
@@ -50,6 +50,20 @@ void store_low_256_bits(mpz_t src, uint128_t& dest) {
     dest.fill(0);
 
     mpz_export(dest.data(), &count, -1, sizeof(uint32_t), 0, 0, low_bits);
+    if (sgn && (mpz_sgn(src) < 0)) {
+        dest[3] |= (1<<31);
+    }
+}
+
+void load_uint128(uint128_t& dest, mpz_t &src, bool use_sgn=false) {
+    bool sgn = dest[3] >> 31;
+    if (use_sgn) {
+        dest[3] &= ~(1<<31);
+    }
+    mpz_import(src, 4, -1, sizeof(uint32_t), 0, 0, dest.data());
+    if (use_sgn && sgn) {
+        mpz_neg(src, src);
+    }
 }
 
 struct HashEntry
@@ -87,17 +101,77 @@ struct HashTable
     int addPoint(Kangaroo &point) {
         uint128_t position, offset;
         store_low_256_bits(point.P.x, position);
-        store_low_256_bits(point.offset, offset);
+        store_low_256_bits(point.offset, offset, true);
         
         if (entries.find(position) == entries.end()) {
             entries[position] = { offset, point.herd };
             return 0;
         } else {
-            // TODO
+            auto &entry = entries[position];
+            if (point.herd == entry.herd) {
+                if (point.herd == Tame) {
+                    printf("tame collision detected\n");
+                    return -1;
+                }
+                if (entry.offset == offset) {
+                    printf("bad collision detected\n");
+                    return -1;
+                }
+            }
+            printf("%d %d\n", point.herd, entry.herd);
+            ECPoint P1, P2;
+            int f1 = compute_node(point.herd, offset, P1);
+            int f2 = compute_node(entry.herd, entry.offset, P2);
+            assert(mpz_cmp(P1.x, P2.x) == 0);
+            mpz_t o1, o2;
+            mpz_inits(o1, o2, NULL);
+            load_uint128(offset, o1, true);
+            load_uint128(entry.offset, o2, true);
+            if(mpz_cmp(P1.y, P2.y)==0) {
+                f1 -= f2;
+                mpz_sub(o1, o1, o2);
+            } else {
+                f1 += f2;
+                mpz_add(o1, o1, o2);
+            }
+            if (f1 == 0) {
+                mpz_clears(o1, o2, NULL);
+                return -1;
+            }
+            mpz_set_si(o2, -f1);
+            mpz_invert(o2, o2, order);
+            mpz_mul(o1, o1, o2);
+            mpz_add(o1, o1, mid);
+            mpz_mod(o1, o1, order);
+            
             printf("collision detected\n");
-            printf("%d %d\n", point.herd, entries[position].herd);
+            print_mpz(o1);
+            mpz_clears(o1, o2, NULL);
             return 1;
         }
+    }
+
+    int compute_node(Herd herd, uint128_t offset, ECPoint &P) {
+        mpz_t tmp;
+        mpz_init(tmp);
+        load_uint128(offset, tmp, true);
+        point_mul(P, G, tmp, param);
+        mpz_clear(tmp);
+        int ret;
+        switch (herd)
+        {
+        case Tame:
+            ret = 0;
+            break;
+        case Wild:
+            ret = 1;
+            point_add(P, P, target, param);
+            break;
+        case InverseWild:
+            ret = -1;
+            point_add(P, P, target_inv, param);
+        }
+        return ret;
     }
 };
 
@@ -150,6 +224,28 @@ void init_jumptable(JumpEntry *jumptable, size_t count)
     }
 }
 
+void shuffle_point(Kangaroo &ka, size_t range_size) {
+    THREAD_LOCAL_MPZ_WORKSPACE(s);
+    switch (ka.herd)
+    {
+    case Tame:
+        mpz_randombits(s, range_size, true);
+        point_mul(ka.P, G, s, param);
+        mpz_set(ka.offset, s);
+        break;
+    case Wild:
+        mpz_randombits(s, range_size-1, true);
+        point_mul(ka.P, G, s, param);
+        point_add(ka.P, ka.P, target, param);
+        mpz_set(ka.offset, s);
+        break;
+    case InverseWild:
+        mpz_randombits(s, range_size-1, true);
+        point_mul(ka.P, G, s, param);
+        point_add(ka.P, ka.P, target_inv, param);
+        mpz_set(ka.offset, s);
+    }
+}
 
 int main()
 {
@@ -172,35 +268,15 @@ int main()
 
     Kangaroo *kangaroos = new Kangaroo[400];
     size_t range_size = mpz_sizeinbase(mid, 2);
-    mpz_t s;
-    mpz_init(s);
+    
     for (int i = 0; i < 400; i++) {
-        Herd herd = (Herd)(i % 3);
-        switch (herd)
-        {
-        case Tame:
-            kangaroos[i].herd = Tame;
-            mpz_randombits(s, range_size, true);
-            point_mul(kangaroos[i].P, G, s, param);
-            mpz_set(kangaroos[i].offset, s);
-            break;
-        case Wild:
-            kangaroos[i].herd = Wild;
-            mpz_randombits(s, range_size-1, true);
-            point_mul(kangaroos[i].P, G, s, param);
-            point_add(kangaroos[i].P, kangaroos[i].P, target, param);
-            mpz_set(kangaroos[i].offset, s);
-            break;
-        case InverseWild:
-            kangaroos[i].herd = InverseWild;
-            mpz_randombits(s, range_size-1, true);
-            point_mul(kangaroos[i].P, G, s, param);
-            point_add(kangaroos[i].P, kangaroos[i].P, target_inv, param);
-            mpz_set(kangaroos[i].offset, s);
-        }
+        auto &ka = kangaroos[i];
+        ka.herd = (Herd)(i % 3);
+        shuffle_point(ka, range_size);
     }
     
-
+    mpz_t s;
+    mpz_init(s);
     bool find=false;
     size_t cnt=0;
     while(!find) {
@@ -214,9 +290,11 @@ int main()
             c = mpz_get_ui(s);
             if ((c & DP_MASK) == 0) {
                 int ret = table.addPoint(ka);
-                if (ret != 0) {
+                if (ret == 1) {
                     find = true;
                     break;
+                } else if (ret != 0) {
+                    shuffle_point(ka, range_size);
                 }
             }
         }
