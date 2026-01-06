@@ -141,7 +141,7 @@ __device__ __forceinline__ int32_t divsteps_n_matrix_var(int32_t eta, uint32_t f
       r = -tmp;
     }
     uint32_t limit = min(min(eta+1, (int32_t)i), 4);
-    uint32_t w = (g * NEGINV16[(f&15)]) & ((1<<limit) - 1); // TODO: use ubfe
+    uint32_t w = (g * NEGINV16[(f&15)]) & ((1<<limit) - 1);
     // g, q, r = g + w*f, q + w*u, r + w*v
     g = g + w*f;
     q = q + int32_t(w)*u;
