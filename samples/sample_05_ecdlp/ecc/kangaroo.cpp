@@ -95,7 +95,7 @@ struct HashTable
         } else {
             // TODO
             printf("collision detected\n");
-            printf("%d %d", point.herd, entries[position].herd);
+            printf("%d %d\n", point.herd, entries[position].herd);
             return 1;
         }
     }
@@ -123,17 +123,20 @@ void init_jumptable(JumpEntry *jumptable, size_t count)
 {
     double power_range = mpz_get_d(max_offset);
     power_range = log2(power_range) / 2;
-    uint32_t jump_bits = ceil(power_range+0.5);
+    uint32_t jump_bits = ceil(power_range+1);
     printf("jump_bits: %d\n", jump_bits);
     printf("power_range: %f\n", power_range);
 
-    double dist_avg, max_avg, min_avg;
+    double dist_avg, max_avg, min_avg, max_range;
     max_avg = pow(2.0, power_range + 0.05);
     min_avg = pow(2.0, power_range - 0.05);
+    max_range = pow(2.0, power_range + 1);
     while (true) {
         dist_avg = 0.0;
         for (size_t i = 0; i < count; i++) {
-            mpz_randombits(jumptable[i].offset, jump_bits);
+            do {
+                mpz_randombits(jumptable[i].offset, jump_bits);
+            } while (mpz_get_d(jumptable[i].offset) > max_range);
             dist_avg += mpz_get_d(jumptable[i].offset);
         }
         dist_avg /= count;
@@ -212,7 +215,6 @@ int main()
             if ((c & DP_MASK) == 0) {
                 int ret = table.addPoint(ka);
                 if (ret != 0) {
-                    printf("found\n");
                     find = true;
                     break;
                 }
