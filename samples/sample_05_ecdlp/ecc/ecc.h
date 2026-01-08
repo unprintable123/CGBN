@@ -28,7 +28,8 @@ struct ECParameters
 struct ECPoint
 {
     mpz_t x, y;
-    int z; // 0 is infinity
+    bool z; // 0 is infinity
+    bool _is_mont=false;
 
     ECPoint(bool infinity = false) {
         mpz_init(x);
@@ -41,11 +42,14 @@ struct ECPoint
         mpz_clear(y);
     }
 
+    void to_mont_(ECParameters &param);
+    void from_mont_(ECParameters &param);
+
     bool operator==(ECPoint &p) {
         if (z == 0) {
             return p.z == 0;
         } else {
-            return p.z == 1 && mpz_cmp(x, p.x) == 0 && mpz_cmp(y, p.y) == 0;
+            return p.z == 1 && mpz_cmp(x, p.x) == 0 && mpz_cmp(y, p.y) == 0 && _is_mont == p._is_mont;
         }
     }
 };
@@ -162,6 +166,20 @@ void from_mont(mpz_t &r, mpz_t &x, ECParameters &param) {
     mont_redc(r, x, param);
 }
 
+void ECPoint::to_mont_(ECParameters &param) {
+    assert(!_is_mont);
+    to_mont(x, x, param);
+    to_mont(y, y, param);
+    _is_mont = true;
+}
+
+void ECPoint::from_mont_(ECParameters &param) {
+    assert(_is_mont);
+    from_mont(x, x, param);
+    from_mont(y, y, param);
+    _is_mont = false;
+}
+
 void init_param(ECParameters &param) {
     size_t bits = mpz_sizeinbase(param.p, 2);
     assert(bits <= NBITS);
@@ -192,13 +210,19 @@ void extend_point(ECPointExtended &p1, ECPoint &p0, ECParameters &param) {
         mpz_set_ui(p1.y, 0);
         mpz_set_ui(p1.z, 0);
     } else {
-        to_mont(p1.x, p0.x, param);
-        to_mont(p1.y, p0.y, param);
+        if (p0._is_mont) {
+            mpz_set(p1.x, p0.x);
+            mpz_set(p1.y, p0.y);
+        } else {
+            to_mont(p1.x, p0.x, param);
+            to_mont(p1.y, p0.y, param);
+        }
         mpz_set(p1.z, param._r);
     }
 }
 
-void proj_point(ECPoint &p0, ECPointExtended &p1, ECParameters &param) {
+void proj_point(ECPoint &p0, ECPointExtended &p1, ECParameters &param, bool is_mont=false) {
+    p0._is_mont = is_mont;
     if (is_infinity(p1)) {
         p0.z = 0;
     } else {
@@ -206,7 +230,11 @@ void proj_point(ECPoint &p0, ECPointExtended &p1, ECParameters &param) {
         THREAD_LOCAL_MPZ_WORKSPACE(z_inv);
 
         mpz_invert(z_inv, p1.z, param.p);
-        mont_mul(z_inv, z_inv, param._r2, param);
+        if (is_mont) {
+            mont_mul(z_inv, z_inv, param._r3, param);
+        } else {
+            mont_mul(z_inv, z_inv, param._r2, param);
+        }
         mont_mul(p0.x, p1.x, z_inv, param);
         mont_mul(p0.y, p1.y, z_inv, param);
     }
@@ -217,7 +245,13 @@ void print_point(ECPoint &p) {
     mpz_out_str(stdout, 16, p.x);
     printf(", 0x");
     mpz_out_str(stdout, 16, p.y);
-    printf(")\n");
+    printf(") mont: ");
+    if (p._is_mont) {
+        printf("true\n");
+    } else {
+        printf("false\n");
+
+    }
 }
 
 void print_point(ECPointExtended &p) {
@@ -278,8 +312,13 @@ bool is_on_curve(ECPoint &p, ECParameters &param) {
     mpz_init(x_mont);
     mpz_init(y_mont);
 
-    to_mont(x_mont, p.x, param);
-    to_mont(y_mont, p.y, param);
+    if (!p._is_mont) {
+        to_mont(x_mont, p.x, param);
+        to_mont(y_mont, p.y, param);
+    } else {
+        mpz_set(x_mont, p.x);
+        mpz_set(y_mont, p.y);
+    }
     mont_sqr(t1, x_mont, param);
     mont_add(t1, t1, param._a_mont, param);
     mont_mul(t1, t1, x_mont, param);
@@ -305,6 +344,7 @@ void point_set(ECPoint &r, ECPoint &p) {
     mpz_set(r.x, p.x);
     mpz_set(r.y, p.y);
     r.z = p.z;
+    r._is_mont = p._is_mont;
 }
 
 void point_neg_(ECPointExtended &r, ECParameters &param) {
@@ -406,10 +446,10 @@ void point_double(ECPoint &r, ECPoint &p, ECParameters &param) {
             return;
         }
         
-        THREAD_LOCAL_MPZ_WORKSPACE(lambda, t1, x1_mont, y1_mont);
+        THREAD_LOCAL_MPZ_WORKSPACE(lambda, t1, t2, x1_mont_, y1_mont_);
 
-        to_mont(x1_mont, p.x, param);
-        to_mont(y1_mont, p.y, param);
+        mpz_t& x1_mont = (!p._is_mont) ? (to_mont(x1_mont_, p.x, param), x1_mont_) : p.x;
+        mpz_t& y1_mont = (!p._is_mont) ? (to_mont(y1_mont_, p.y, param), y1_mont_) : p.y;
         mont_sqr(t1, x1_mont, param);
         mont_add(lambda, t1, t1, param);
         mont_add(lambda, lambda, t1, param);
@@ -419,15 +459,20 @@ void point_double(ECPoint &r, ECPoint &p, ECParameters &param) {
         mont_inv(t1, t1, param);
         mont_mul(lambda, lambda, t1, param); // lambda = (3 * x1^2 + a) / (2 * y1)
         
-        mont_mul(r.x, lambda, lambda, param);
-        mont_sub(r.x, r.x, x1_mont, param);
-        mont_sub(r.x, r.x, x1_mont, param); // x3 = lambda^2 - 2 * x1
-        mont_sub(t1, x1_mont, r.x, param);
-        mont_mul(r.y, lambda, t1, param);
-        mont_sub(r.y, r.y, y1_mont, param); // y3 = lambda * (x1 - x3) - y1
+        mont_mul(t1, lambda, lambda, param);
+        mont_sub(t1, t1, x1_mont, param);
+        mont_sub(t1, t1, x1_mont, param); // x3 = lambda^2 - 2 * x1
+        mont_sub(t2, x1_mont, t1, param);
+        mpz_set(r.x, t1);
+        mont_mul(t1, lambda, t2, param);
+        mont_sub(r.y, t1, y1_mont, param); // y3 = lambda * (x1 - x3) - y1
 
-        from_mont(r.x, r.x, param);
-        from_mont(r.y, r.y, param);
+        if (!p._is_mont) {
+            from_mont(r.x, r.x, param);
+            from_mont(r.y, r.y, param);
+        }
+        r.z = 1;
+        r._is_mont = p._is_mont;
     }
 }
 
@@ -447,26 +492,30 @@ void point_add(ECPoint &r, ECPoint &p1, ECPoint &p2, ECParameters &param) {
             }
             return;
         }
-        THREAD_LOCAL_MPZ_WORKSPACE(lambda, t1, t2, x1_mont, x2_mont, y1_mont, y2_mont);
-        to_mont(x1_mont, p1.x, param);
-        to_mont(x2_mont, p2.x, param);
-        to_mont(y1_mont, p1.y, param);
-        to_mont(y2_mont, p2.y, param);
+        THREAD_LOCAL_MPZ_WORKSPACE(lambda, t1, t2, x1_mont_, x2_mont_, y1_mont_, y2_mont_);
+        mpz_t& x1_mont = (!p1._is_mont) ? (to_mont(x1_mont_, p1.x, param), x1_mont_) : p1.x;
+        mpz_t& x2_mont = (!p2._is_mont) ? (to_mont(x2_mont_, p2.x, param), x2_mont_) : p2.x;
+        mpz_t& y1_mont = (!p1._is_mont) ? (to_mont(y1_mont_, p1.y, param), y1_mont_) : p1.y;
+        mpz_t& y2_mont = (!p2._is_mont) ? (to_mont(y2_mont_, p2.y, param), y2_mont_) : p2.y;
 
         mont_sub(t1, y2_mont, y1_mont, param);
         mont_sub(t2, x2_mont, x1_mont, param);
         mont_inv(t2, t2, param);
         mont_mul(lambda, t1, t2, param); // lambda = (y2 - y1) / (x2 - x1)
-        mont_mul(r.x, lambda, lambda, param);
-        mont_sub(r.x, r.x, x1_mont, param);
-        mont_sub(r.x, r.x, x2_mont, param); // x3 = lambda^2 - x1 - x2
-        mont_sub(t2, x1_mont, r.x, param);
-        mont_mul(r.y, lambda, t2, param);
-        mont_sub(r.y, r.y, y1_mont, param); // y3 = lambda * (x1 - x3) - y1
+        mont_mul(t1, lambda, lambda, param);
+        mont_sub(t1, t1, x1_mont, param);
+        mont_sub(t1, t1, x2_mont, param); // x3 = lambda^2 - x1 - x2
+        mont_sub(t2, x1_mont, t1, param);
+        mpz_set(r.x, t1);
+        mont_mul(t1, lambda, t2, param);
+        mont_sub(r.y, t1, y1_mont, param); // y3 = lambda * (x1 - x3) - y1
 
-        from_mont(r.x, r.x, param);
-        from_mont(r.y, r.y, param);
+        if (!p1._is_mont) {
+            from_mont(r.x, r.x, param);
+            from_mont(r.y, r.y, param);
+        }
         r.z = 1;
+        r._is_mont = p1._is_mont;
     }
 }
 
@@ -509,7 +558,7 @@ void point_mul(ECPoint &r, ECPoint &p, mpz_t &n, ECParameters &param) {
     ECPointExtended P;
     extend_point(P, p, param);
     point_mul(P, P, n, param);
-    proj_point(r, P, param);
+    proj_point(r, P, param, p._is_mont);
 }
 
 template<typename T>

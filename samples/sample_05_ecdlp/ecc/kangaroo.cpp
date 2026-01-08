@@ -5,7 +5,7 @@
 #include "ecc.h"
 #include "../../utility/cpu_support.h"
 
-constexpr uint32_t DP_SIZE = 12;
+constexpr uint32_t DP_SIZE = 10;
 constexpr uint32_t DP_MASK = (1 << DP_SIZE) - 1;
 
 enum Herd {
@@ -135,6 +135,7 @@ struct HashTable
                 mpz_add(o1, o1, o2);
             }
             if (f1 == 0) {
+                printf("bad collision detected\n");
                 mpz_clears(o1, o2, NULL);
                 return -1;
             }
@@ -144,7 +145,7 @@ struct HashTable
             mpz_add(o1, o1, mid);
             mpz_mod(o1, o1, order);
             
-            printf("collision detected\n");
+            printf("Solution: 0x");
             print_mpz(o1);
             mpz_clears(o1, o2, NULL);
             return 1;
@@ -188,7 +189,7 @@ void read_curve() {
     mpz_set_str(order, "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141", 16);
 
     mpz_set_str(max_offset, "fffffffffff", 16);
-    point_mul(target, G, 0x87c356f637L, param);
+    point_mul(target, G, 0xa87c356f637L, param);
 
     assert(mpz_cmp(max_offset, order) < 0);
 }

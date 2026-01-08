@@ -17,12 +17,13 @@ int main()
     ECPointExtended G, P;
     extend_point(G, G0, param);
     assert(is_on_curve(G, param));
+    G0.to_mont_(param);
 
-    for (int i=0; i<100; i++) {
+    for (int i=0; i<1000; i++) {
         point_mul(G0, G0, -405198663214378, param);
         point_mul(G, G, -405198663214378, param);
     }
-    proj_point(P0, G, param);
+    proj_point(P0, G, param, true);
     
     assert(P0==G0);
 }
