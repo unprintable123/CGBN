@@ -93,7 +93,7 @@ instance_t *generate_instances(uint32_t count) {
 
   ECPoint P, Q;
   point_mul(P, G, 0x123, param);
-  point_mul(Q, G, 0x96532837443, param);
+  point_mul(Q, G, 0x960532837443, param);
 
   for (uint32_t i=0; i<count; i++) {
     instances[i].A.from_point(P);
@@ -111,7 +111,7 @@ void verify_results(instance_t *instances, uint32_t count) {
     instances[i].B.to_point(Q);
     instances[i].C.to_point(R);
     // point_double(P, P, param);
-    point_mul(P, P, 6, param);
+    point_mul(P, P, 11, param);
     point_add(P, P, Q, param);
     if (!(P==R)) {
       printf("gpu kernel failed on instance %d\n", i);
@@ -396,14 +396,14 @@ __global__ void kernel_point_add(cgbn_error_report_t *report, instance_t *instan
 
   ECPointExtGPU A_ext(bn_env, A, curve), B_ext(bn_env, B, curve);
 
-  // point_double(bn_env, A, A, curve);
-  // point_add(bn_env, A, A, B, curve);
-  // point_double(bn_env, A_ext, A_ext, curve);
   env_t::cgbn_t n;
   cgbn_set_ui32(bn_env, n, 6);
   point_mul(bn_env, A_ext, A_ext, n, curve);
   point_add(bn_env, A_ext, A_ext, B_ext, curve);
   proj_point(bn_env, A, A_ext, curve);
+  point_double(bn_env, A, A, curve);
+  cgbn_sub(bn_env, B.y, curve.p, B.y);
+  point_add(bn_env, A, A, B, curve);
 
   save_point(bn_env, &(instances[instance].C), A);
 }
