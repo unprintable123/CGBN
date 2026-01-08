@@ -22,6 +22,8 @@ IN THE SOFTWARE.
 
 ***/
 
+#pragma once
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda.h>
