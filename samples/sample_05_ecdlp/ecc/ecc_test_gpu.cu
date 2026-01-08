@@ -93,7 +93,7 @@ instance_t *generate_instances(uint32_t count) {
 
   ECPoint P, Q;
   point_mul(P, G, 0x123, param);
-  point_mul(Q, G, 0x960532837443, param);
+  point_mul(Q, G, 0x760532837443, param);
 
   for (uint32_t i=0; i<count; i++) {
     instances[i].A.from_point(P);
@@ -111,7 +111,7 @@ void verify_results(instance_t *instances, uint32_t count) {
     instances[i].B.to_point(Q);
     instances[i].C.to_point(R);
     // point_double(P, P, param);
-    point_mul(P, P, 11, param);
+    point_mul(P, P, 12, param);
     point_add(P, P, Q, param);
     if (!(P==R)) {
       printf("gpu kernel failed on instance %d\n", i);
