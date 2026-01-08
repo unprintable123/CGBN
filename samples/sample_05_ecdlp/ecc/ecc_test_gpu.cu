@@ -19,9 +19,20 @@ struct Curve {
     cgbn_mem_t<NBITS> p;
     cgbn_mem_t<NBITS> a;
     cgbn_mem_t<NBITS> b;
+    cgbn_mem_t<NBITS> _r;
     cgbn_mem_t<NBITS> _r2;
     cgbn_mem_t<NBITS> _r3;
     uint32_t np0;
+
+    Curve(ECParameters &param) {
+      from_mpz(param.p, p._limbs, NBITS/32);
+      from_mpz(param._a_mont, a._limbs, NBITS/32);
+      from_mpz(param._b_mont, b._limbs, NBITS/32);
+      from_mpz(param._r, _r._limbs, NBITS/32);
+      from_mpz(param._r2, _r2._limbs, NBITS/32);
+      from_mpz(param._r3, _r3._limbs, NBITS/32);
+      np0 = mpz_get_ui(param._p_inv_neg);
+    }
 };
 
 struct ECPointCGBN {
@@ -99,7 +110,8 @@ void verify_results(instance_t *instances, uint32_t count) {
     instances[i].A.to_point(P);
     instances[i].B.to_point(Q);
     instances[i].C.to_point(R);
-    point_double(P, P, param);
+    // point_double(P, P, param);
+    point_mul(P, P, 6, param);
     point_add(P, P, Q, param);
     if (!(P==R)) {
       printf("gpu kernel failed on instance %d\n", i);
@@ -121,10 +133,25 @@ typedef struct {
     env_t::cgbn_t p;
     env_t::cgbn_t a;
     env_t::cgbn_t b;
+    env_t::cgbn_t _r;
     env_t::cgbn_t _r2;
     env_t::cgbn_t _r3;
     uint32_t np0;
 } CurveGPU;
+
+struct ECPointExtGPU {
+  env_t::cgbn_t x;
+  env_t::cgbn_t y;
+  env_t::cgbn_t z;
+
+  __device__ ECPointExtGPU() {}
+
+  __device__ ECPointExtGPU(env_t env, ECPointGPU &P, CurveGPU &curve) {
+    cgbn_set(env, x, P.x);
+    cgbn_set(env, y, P.y);
+    cgbn_set(env, z, curve._r);
+  }
+};
 
 __device__ __forceinline__ void load_point(env_t env, ECPointGPU &r, ECPointCGBN *const address) {
   cgbn_load(env, r.x, &(address->x));
@@ -178,6 +205,118 @@ __device__ __forceinline__ void mont_inv(env_t env, typename env_t::cgbn_t &r, c
   yang_modinv_odd(env, r, a, curve.p);
   cgbn_mont_mul(env, r, r, curve._r3, curve.p, curve.np0);
 }
+
+__device__ __forceinline__ void point_add(env_t env, ECPointExtGPU &r, const ECPointExtGPU &p1, const ECPointExtGPU &p2, const CurveGPU &curve) { 
+  env_t::cgbn_t x1z2, y1z2, z1z2, u, uu, v, vv, vvv, R, A;
+
+  mont_mul(env, x1z2, p1.x, p2.z, curve);
+  mont_mul(env, y1z2, p1.y, p2.z, curve);
+  mont_mul(env, z1z2, p1.z, p2.z, curve);
+
+  mont_mul(env, u, p2.y, p1.z, curve);
+  mont_sub(env, u, u, y1z2, curve);
+  mont_sqr(env, uu, u, curve);
+
+  mont_mul(env, v, p2.x, p1.z, curve);
+  mont_sub(env, v, v, x1z2, curve);
+  mont_sqr(env, vv, v, curve);
+  mont_mul(env, vvv, vv, v, curve);
+
+#ifdef ADD_CHECK
+  assert(cgbn_equals_ui32(env, u, 0) == 0 || cgbn_equals_ui32(env, v, 0) == 0);
+#endif
+
+  mont_mul(env, R, vv, x1z2, curve);
+  mont_mul(env, A, uu, z1z2, curve);
+  mont_sub(env, A, A, vvv, curve);
+  mont_sub(env, A, A, R, curve);
+  mont_sub(env, A, A, R, curve);
+  mont_sub(env, R, R, A, curve);
+
+  mont_mul(env, r.x, v, A, curve);
+  mont_mul(env, r.z, vvv, z1z2, curve);
+  mont_mul(env, vvv, vvv, y1z2, curve);
+  mont_mul(env, r.y, u, R, curve);
+  mont_sub(env, r.y, r.y, vvv, curve);
+}
+
+__device__ __forceinline__ void point_double(env_t env, ECPointExtGPU &r, const ECPointExtGPU &P, const CurveGPU &curve) {
+  env_t::cgbn_t xx, zz, w, s, ss, sss, R, RR, B, h;
+
+  mont_sqr(env, xx, P.x, curve);
+  mont_sqr(env, zz, P.z, curve);
+  mont_mul(env, w, curve.a, zz, curve);
+  mont_add(env, w, w, xx, curve);
+  mont_add(env, w, w, xx, curve);
+  mont_add(env, w, w, xx, curve); // w = a * zz + 3 * xx
+  mont_mul(env, s, P.y, P.z, curve);
+  mont_add(env, s, s, s, curve); // s = 2 * y * z
+  mont_mul(env, ss, s, s, curve);
+  mont_mul(env, sss, s, ss, curve);
+
+  mont_mul(env, R, P.y, s, curve);
+  mont_mul(env, RR, R, R, curve);
+
+  mont_add(env, B, P.x, R, curve);
+  mont_sqr(env, B, B, curve);
+  mont_sub(env, B, B, RR, curve);
+  mont_sub(env, B, B, xx, curve);
+
+  mont_sqr(env, h, w, curve);
+  mont_sub(env, h, h, B, curve);
+  mont_sub(env, h, h, B, curve);
+
+  mont_mul(env, r.x, h, s, curve);
+  mont_sub(env, B, B, h, curve);
+  mont_mul(env, r.y, w, B, curve);
+  mont_sub(env, r.y, r.y, RR, curve);
+  mont_sub(env, r.y, r.y, RR, curve);
+
+  cgbn_set(env, r.z, sss);
+}
+
+__device__ __forceinline__ void point_set(env_t env, ECPointExtGPU &r, const ECPointExtGPU &P) {
+  cgbn_set(env, r.x, P.x);
+  cgbn_set(env, r.y, P.y);
+  cgbn_set(env, r.z, P.z);
+}
+
+__device__ __forceinline__ void point_mul(env_t env, ECPointExtGPU &r, const ECPointExtGPU &P, const env_t::cgbn_t &n, const CurveGPU &curve) {
+  env_t::cgbn_t n_copy;
+  ECPointExtGPU A, B;
+  cgbn_set(env, n_copy, n);
+  point_set(env, A, P);
+  point_double(env, B, A, curve);
+  bool is_odd = cgbn_get_ui32(env, n_copy) & 1;
+  cgbn_shift_right(env, n_copy, n_copy, 1);
+  while (cgbn_equals_ui32(env, n_copy, 0)==0) {
+    if (cgbn_get_ui32(env, n_copy) & 1) {
+      point_add(env, A, A, B, curve);
+    }
+    point_double(env, B, B, curve);
+    cgbn_shift_right(env, n_copy, n_copy, 1);
+  }
+  if (!is_odd) {
+    cgbn_set(env, B.x, P.x);
+    cgbn_set(env, B.y, P.y);
+    cgbn_set(env, B.z, P.z);
+    cgbn_sub(env, B.y, curve.p, B.y);
+    point_add(env, A, A, B, curve);
+  }
+  point_set(env, r, A);
+}
+
+
+
+
+__device__ __forceinline__ void proj_point(env_t env, ECPointGPU &r, const ECPointExtGPU &P, const CurveGPU &curve) {
+  env_t::cgbn_t z_inv;
+  mont_inv(env, z_inv, P.z, curve);
+  mont_mul(env, r.x, P.x, z_inv, curve);
+  mont_mul(env, r.y, P.y, z_inv, curve);
+  r.z=(cgbn_equals_ui32(env, P.z, 0)==0);
+}
+
 
 __device__ __forceinline__ void point_add(env_t env, ECPointGPU &r, const ECPointGPU &P, const ECPointGPU &Q, const CurveGPU &curve) {
 #ifdef ADD_CHECK
@@ -247,6 +386,7 @@ __global__ void kernel_point_add(cgbn_error_report_t *report, instance_t *instan
   cgbn_load(bn_env, curve.p, &(curve_->p));
   cgbn_load(bn_env, curve.a, &(curve_->a));
   cgbn_load(bn_env, curve.b, &(curve_->b));
+  cgbn_load(bn_env, curve._r, &(curve_->_r));
   cgbn_load(bn_env, curve._r2, &(curve_->_r2));
   cgbn_load(bn_env, curve._r3, &(curve_->_r3));
   curve.np0 = curve_->np0;
@@ -254,8 +394,16 @@ __global__ void kernel_point_add(cgbn_error_report_t *report, instance_t *instan
   load_point(bn_env, A, &(instances[instance].A));
   load_point(bn_env, B, &(instances[instance].B));
 
-  point_double(bn_env, A, A, curve);
-  point_add(bn_env, A, A, B, curve);
+  ECPointExtGPU A_ext(bn_env, A, curve), B_ext(bn_env, B, curve);
+
+  // point_double(bn_env, A, A, curve);
+  // point_add(bn_env, A, A, B, curve);
+  // point_double(bn_env, A_ext, A_ext, curve);
+  env_t::cgbn_t n;
+  cgbn_set_ui32(bn_env, n, 6);
+  point_mul(bn_env, A_ext, A_ext, n, curve);
+  point_add(bn_env, A_ext, A_ext, B_ext, curve);
+  proj_point(bn_env, A, A_ext, curve);
 
   save_point(bn_env, &(instances[instance].C), A);
 }
@@ -265,18 +413,11 @@ __global__ void kernel_point_add(cgbn_error_report_t *report, instance_t *instan
 
 
 int main() {
+  read_curve();
   instance_t          *instances, *gpuInstances;
   cgbn_error_report_t *report;
-  Curve *curve = new Curve;
+  Curve *curve = new Curve(param);
   Curve *gpuCurve;
-
-  read_curve();
-  from_mpz(param.p, curve->p._limbs, NBITS/32);
-  from_mpz(param._a_mont, curve->a._limbs, NBITS/32);
-  from_mpz(param._b_mont, curve->b._limbs, NBITS/32);
-  from_mpz(param._r2, curve->_r2._limbs, NBITS/32);
-  from_mpz(param._r3, curve->_r3._limbs, NBITS/32);
-  curve->np0 = mpz_get_ui(param._p_inv_neg);
   
   printf("Genereating instances ...\n");
   instances=generate_instances(INSTANCES);

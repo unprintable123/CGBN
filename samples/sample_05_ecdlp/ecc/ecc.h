@@ -210,14 +210,14 @@ void extend_point(ECPointExtended &p1, ECPoint &p0, ECParameters &param) {
         mpz_set_ui(p1.y, 0);
         mpz_set_ui(p1.z, 0);
     } else {
+        mpz_set(p1.x, p0.x);
+        mpz_set(p1.y, p0.y);
         if (p0._is_mont) {
-            mpz_set(p1.x, p0.x);
-            mpz_set(p1.y, p0.y);
+            mpz_set(p1.z, param._r);
         } else {
-            to_mont(p1.x, p0.x, param);
-            to_mont(p1.y, p0.y, param);
+            mpz_set_ui(p1.z, 1);
         }
-        mpz_set(p1.z, param._r);
+        
     }
 }
 
