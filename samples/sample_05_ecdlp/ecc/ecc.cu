@@ -11,8 +11,8 @@
 #include "ecc.h"
 #include "modinv.cu"
 
-#define GRP_INV_SIZE 128
-#define ADD_CHECK true
+#define GRP_INV_SIZE 32
+#define ADD_CHECK
 
 
 struct Curve {
@@ -313,3 +313,54 @@ __device__ __forceinline__ void point_double(env_t env, ECPointGPU &r, const ECP
   mont_mul(env, t1, lambda, t2, curve);
   mont_sub(env, r.y, t1, P.y, curve); // y3 = lambda*(x1-x3) - y1
 }
+
+__device__ __forceinline__ void batch_inverse(env_t env, env_t::cgbn_t *out, env_t::cgbn_t *inv, CurveGPU &curve) {
+  // compute out[i]*(inv[i]^-1)
+  env_t::cgbn_t prod;
+  cgbn_set(env, prod, curve._r);
+  for (int i=0; i<GRP_INV_SIZE; i++) {
+    mont_mul(env, out[i], out[i], prod, curve);
+    mont_mul(env, prod, prod, inv[i], curve);
+  }
+  mont_inv(env, prod, prod, curve);
+  for (int i=GRP_INV_SIZE-1; i>=0; i--) {
+    mont_mul(env, out[i], out[i], prod, curve);
+    mont_mul(env, prod, prod, inv[i], curve);
+  }
+}
+
+__device__ __forceinline__ void batch_point_add(env_t env, ECPointGPU *Rs, ECPointGPU *Ps, ECPointGPU *Qs, CurveGPU &curve) { 
+#ifdef ADD_CHECK
+for (int i=0; i<GRP_INV_SIZE; i++) {
+  auto &P = Ps[i];
+  auto &Q = Qs[i];
+  assert(P.z!=0);
+  assert(Q.z!=0);
+  assert(cgbn_compare(env, P.x, Q.x)!=0);
+}
+#endif
+  env_t::cgbn_t dy[GRP_INV_SIZE], dx[GRP_INV_SIZE];
+  for (int i=0; i<GRP_INV_SIZE; i++) {
+    auto &P = Ps[i];
+    auto &Q = Qs[i];
+    mont_sub(env, dy[i], P.y, Q.y, curve);
+    mont_sub(env, dx[i], P.x, Q.x, curve);
+  }
+  batch_inverse(env, dy, dx, curve);
+  env_t::cgbn_t t1, t2;
+  for (int i=0; i<GRP_INV_SIZE; i++) {
+    auto &P = Ps[i];
+    auto &Q = Qs[i];
+    auto &R = Rs[i];
+    auto &lambda = dy[i];
+    mont_sqr(env, t1, lambda, curve);
+    mont_sub(env, t1, t1, P.x, curve);
+    mont_sub(env, t1, t1, Q.x, curve); // x3 = lambda^2 - x1 - x2
+    mont_sub(env, t2, P.x, t1, curve);
+    cgbn_set(env, R.x, t1);
+    mont_mul(env, t1, lambda, t2, curve);
+    mont_sub(env, R.y, t1, P.y, curve); // y3 = lambda*(x1-x3) - y1
+    R.z=1;
+  }
+}
+
