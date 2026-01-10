@@ -4,7 +4,7 @@
 
 #include "ecc.cu"
 
-constexpr uint32_t DP_SIZE = 16;
+constexpr uint32_t DP_SIZE = 15;
 constexpr uint32_t DP_MASK = (1 << DP_SIZE) - 1;
 constexpr uint32_t MAX_FOUND = 1 << 18;
 constexpr uint32_t NB_RUN = 512;
@@ -232,8 +232,7 @@ __device__ __forceinline__ void save_output(env_t env, Kangaroo *output, uint32_
     env_t::cgbn_t tmp;
     cgbn_set_ui32(env, tmp, pos);
     pos = cgbn_get_ui32(env, tmp);
-    if (pos >= MAX_FOUND)
-        return;
+    assert(pos < MAX_FOUND);
     save_point(env, &(output[pos].P), P);
     cgbn_store(env, &(output[pos].offset), offset);
     output[pos].herd = herd;
@@ -322,8 +321,8 @@ void read_curve() {
     mpz_set_str(order, "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141", 16);
     G.to_mont_(param);
 
-    mpz_set_str(max_offset, "fffffffffffffff", 16);
-    point_mul(target, G, 0xca6a807c356f637L, param);
+    mpz_set_str(max_offset, "ffffffffffffffff", 16);
+    point_mul(target, G, 0x2ca6a807c356f637L, param);
 
     assert(mpz_cmp(max_offset, order) < 0);
 }

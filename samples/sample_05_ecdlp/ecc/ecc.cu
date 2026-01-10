@@ -11,7 +11,7 @@
 #include "ecc.h"
 #include "modinv.cu"
 
-#define GRP_INV_SIZE 32
+#define GRP_INV_SIZE 128
 #define ADD_CHECK
 
 
