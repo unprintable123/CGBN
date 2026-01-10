@@ -23,5 +23,6 @@ pick:
 ampere: 
 	g++ $(INC) $(LIB) -O3 ecc.h ecc_test.cpp -o ecc_test -lgmp
 	g++ $(INC) $(LIB) -O3 ecc.h kangaroo.cpp -o kangaroo_test -lgmp
-	nvcc $(INC) $(LIB) -O3 -I../../../include -arch=sm_80 ecc_test_gpu.cu -o add_test -lgmp
+	nvcc $(INC) $(LIB) -O3 -I../../../include -arch=sm_80 ecc_test_gpu2.cu -o add_test -lgmp
+	nvcc $(INC) $(LIB) -O3 -I../../../include -arch=sm_80 kangaroo_gpu.cu -o kangaroo_gpu -lgmp
 

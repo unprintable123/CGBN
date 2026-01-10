@@ -4,9 +4,10 @@
 
 #include "ecc.cu"
 
-constexpr uint32_t DP_SIZE = 12;
+constexpr uint32_t DP_SIZE = 16;
 constexpr uint32_t DP_MASK = (1 << DP_SIZE) - 1;
 constexpr uint32_t MAX_FOUND = 1 << 18;
+constexpr uint32_t NB_RUN = 512;
 typedef std::array<uint32_t, 4> uint128_t;
 
 enum Herd {
@@ -44,6 +45,7 @@ void load_uint128(uint128_t& dest, mpz_t &src, bool use_sgn=false) {
         mpz_init_set_ui(tmp, 1);
         mpz_mul_2exp(tmp, tmp, 128);
         mpz_sub(src, tmp, src);
+        mpz_neg(src, src);
 
         mpz_clear(tmp);
     }
@@ -70,6 +72,12 @@ struct JumpEntry
 {
     ECPointCGBN point;
     cgbn_mem_t<NBITS> offset;
+};
+
+struct JumpEntryGPU
+{
+    ECPointGPU point;
+    env_t::cgbn_t offset;
 };
 
 ECParameters param;
@@ -130,7 +138,7 @@ struct HashTable
                 mpz_add(o1, o1, o2);
             }
             if (f1 == 0) {
-                printf("bad collision detected\n");
+                printf("bad collision detected2\n");
                 mpz_clears(o1, o2, NULL);
                 return -1;
             }
@@ -216,17 +224,89 @@ __global__ void kernel_create_kangaroos(cgbn_error_report_t *report, Kangaroo *k
     save_point(bn_env, &(kangaroos[instance].P), P0);
 }
 
-__device__ __forceinline__ void save_output(env_t env, Kangaroo *output, uint32_t *atom_pos, ECPointGPU &P, env_t::cgbn_t &offset, Herd herd) {
-    uint32_t pos = atomicAdd(atom_pos, 1);
+__device__ __forceinline__ void save_output(env_t env, Kangaroo *output, uint32_t *output_idx, uint32_t *atom_pos, uint32_t idx, ECPointGPU &P, env_t::cgbn_t &offset, Herd herd) {
+    bool is_main = (threadIdx.x % TPI == 0);
+    uint32_t pos=4294967295U;
+    if (is_main)
+        pos = atomicAdd(atom_pos, 1);
+    env_t::cgbn_t tmp;
+    cgbn_set_ui32(env, tmp, pos);
+    pos = cgbn_get_ui32(env, tmp);
+    if (pos >= MAX_FOUND)
+        return;
     save_point(env, &(output[pos].P), P);
     cgbn_store(env, &(output[pos].offset), offset);
     output[pos].herd = herd;
+    output_idx[pos] = idx;
 }
 
-__global__ void kernel_jump(cgbn_error_report_t *report, Kangaroo *kangaroos, JumpEntry *jumptable, size_t count) {
+__global__ void kernel_jump(cgbn_error_report_t *report, Kangaroo *kangaroos, JumpEntry *jumptable_, Kangaroo *output, uint32_t *output_idx, uint32_t *atom_pos, Curve *curve_, size_t count) {
     int32_t instance;
 
-    // TODO
+    instance=(blockIdx.x*blockDim.x + threadIdx.x)/TPI;
+    if(instance>=count)
+        return;
+    
+    context_t          bn_context(cgbn_report_monitor, report, instance);
+    env_t              bn_env(bn_context);
+    CurveGPU curve;
+    cgbn_load(bn_env, curve.p, &(curve_->p));
+    cgbn_load(bn_env, curve.a, &(curve_->a));
+    cgbn_load(bn_env, curve.b, &(curve_->b));
+    cgbn_load(bn_env, curve._r, &(curve_->_r));
+    cgbn_load(bn_env, curve._r2, &(curve_->_r2));
+    cgbn_load(bn_env, curve._r3, &(curve_->_r3));
+    curve.np0 = curve_->np0;
+
+    ECPointGPU Ps[GRP_INV_SIZE];
+    env_t::cgbn_t offset[GRP_INV_SIZE];
+    Herd herd[GRP_INV_SIZE];
+    JumpEntryGPU jumptable[64];
+    for (int i = 0; i < GRP_INV_SIZE; i++) {
+        load_point(bn_env, Ps[i], &(kangaroos[instance*GRP_INV_SIZE+i].P));
+        cgbn_load(bn_env, offset[i], &(kangaroos[instance*GRP_INV_SIZE+i].offset));
+        herd[i] = kangaroos[instance*GRP_INV_SIZE+i].herd;
+    }
+    for (int i = 0; i < 64; i++) {
+        load_point(bn_env, jumptable[i].point, &(jumptable_[i].point));
+        cgbn_load(bn_env, jumptable[i].offset, &(jumptable_[i].offset));
+    }
+
+    for (int nr = 0; nr < NB_RUN; nr++) {
+        env_t::cgbn_t dy[GRP_INV_SIZE], dx[GRP_INV_SIZE];
+        for (int i=0; i<GRP_INV_SIZE; i++) {
+            auto &P = Ps[i];
+            uint32_t jmp = cgbn_get_ui32(bn_env, P.y) >> (32-6);
+            auto &Q = jumptable[jmp].point;
+            mont_sub(bn_env, dy[i], P.y, Q.y, curve);
+            mont_sub(bn_env, dx[i], P.x, Q.x, curve);
+        }
+        batch_inverse(bn_env, dy, dx, curve);
+        env_t::cgbn_t t1, t2;
+        for (int i=0; i<GRP_INV_SIZE; i++) {
+            auto &P = Ps[i];
+            uint32_t jmp = cgbn_get_ui32(bn_env, P.y) >> (32-6);
+            auto &Q = jumptable[jmp].point;
+            auto &lambda = dy[i];
+            mont_sqr(bn_env, t1, lambda, curve);
+            mont_sub(bn_env, t1, t1, P.x, curve);
+            mont_sub(bn_env, t1, t1, Q.x, curve); // x3 = lambda^2 - x1 - x2
+            mont_sub(bn_env, t2, P.x, t1, curve);
+            cgbn_set(bn_env, P.x, t1);
+            mont_mul(bn_env, t1, lambda, t2, curve);
+            mont_sub(bn_env, P.y, t1, P.y, curve); // y3 = lambda*(x1-x3) - y1
+            cgbn_add(bn_env, offset[i], offset[i], jumptable[jmp].offset);
+
+            if ((cgbn_get_ui32(bn_env, P.x) & DP_MASK) == 0) {
+                save_output(bn_env, output, output_idx, atom_pos, instance*GRP_INV_SIZE+i, P, offset[i], herd[i]);
+            }
+        }
+    }
+    
+    for (int i = 0; i < GRP_INV_SIZE; i++) {
+        save_point(bn_env, &(kangaroos[instance*GRP_INV_SIZE+i].P), Ps[i]);
+        cgbn_store(bn_env, &(kangaroos[instance*GRP_INV_SIZE+i].offset), offset[i]);
+    }
 }
 
 void read_curve() {
@@ -242,8 +322,8 @@ void read_curve() {
     mpz_set_str(order, "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141", 16);
     G.to_mont_(param);
 
-    mpz_set_str(max_offset, "fffffffffff", 16);
-    point_mul(target, G, 0xa87c356f637L, param);
+    mpz_set_str(max_offset, "fffffffffffffff", 16);
+    point_mul(target, G, 0xca6a807c356f637L, param);
 
     assert(mpz_cmp(max_offset, order) < 0);
 }
@@ -326,27 +406,11 @@ Kangaroo *prepare_kangaroo(cgbn_error_report_t *report, size_t range_size, size_
             mpz_randombits(s, range_size-1, true);
         }
         from_mpz_signed(kangaroos[i].offset, s);
-        // shuffle_point(kangaroos[i], range_size);
     }
     CUDA_CHECK(cudaMemcpy(gpu_kangaroos, kangaroos, count * sizeof(Kangaroo), cudaMemcpyHostToDevice));
     kernel_create_kangaroos<<<(count+(128/TPI-1))/(128/TPI), 128>>>(report, gpu_kangaroos, G_gpu, target_gpu, target_inv_gpu, gpuCurve, count);
     CUDA_CHECK(cudaDeviceSynchronize());
     CGBN_CHECK(report);
-
-    // Kangaroo *cpu_verify = (Kangaroo *)malloc(count * sizeof(Kangaroo));
-    // CUDA_CHECK(cudaMemcpy(cpu_verify, gpu_kangaroos, count * sizeof(Kangaroo), cudaMemcpyDeviceToHost));
-    // ECPoint A, B;
-    // for (size_t i = 0; i < count; i++) {
-    //     kangaroos[i].P.to_point(A);
-    //     cpu_verify[i].P.to_point(B);
-    //     if(!(A==B)){
-    //         printf("%lu, herd %d\n", i, cpu_verify[i].herd);
-    //         print_words(cpu_verify[i].offset._limbs, NBITS/32);
-    //         print_point(A);
-    //         print_point(B);
-    //         exit(1);
-    //     }
-    // }
 
     free(kangaroos);
     mpz_clear(s);
@@ -407,6 +471,58 @@ int main()
 
     size_t range_size = mpz_sizeinbase(mid, 2);
     Kangaroo *kangaroos = prepare_kangaroo(report, range_size, num_kangaroo);
-    Kangaroo *gpuOutput;
+
+    // Kangaroo *cpu_verify = (Kangaroo *)malloc(num_kangaroo * sizeof(Kangaroo));
+    // CUDA_CHECK(cudaMemcpy(cpu_verify, kangaroos, num_kangaroo * sizeof(Kangaroo), cudaMemcpyDeviceToHost));
+    // ECPoint A, B;
+    // for (size_t i = 0; i < num_kangaroo; i++) {
+    //     cpu_verify[i].P.to_point(A);
+    //     uint128_t offset;
+    //     store_low_256_bits(cpu_verify[i].offset, offset);
+    //     table.compute_node(cpu_verify[i].herd, offset, B);
+    //     if(!(A==B)){
+    //         printf("%lu, herd %d\n", i, cpu_verify[i].herd);
+    //         print_words(cpu_verify[i].offset._limbs, NBITS/32);
+    //         print_point(A);
+    //         print_point(B);
+    //         exit(1);
+    //     }
+    // }
+
+    Kangaroo *gpuOutput, *output;
+    uint32_t atom_pos;
+    uint32_t *gpu_atom_pos;
+    uint32_t *output_idx, *gpu_output_idx;
+    output = (Kangaroo *)malloc(MAX_FOUND * sizeof(Kangaroo));
+    output_idx = (uint32_t *)malloc(MAX_FOUND * sizeof(uint32_t));
+    CUDA_CHECK(cudaMalloc(&gpuOutput, MAX_FOUND * sizeof(Kangaroo)));
+    CUDA_CHECK(cudaMalloc(&gpu_output_idx, MAX_FOUND * sizeof(uint32_t)));
+    CUDA_CHECK(cudaMalloc(&gpu_atom_pos, sizeof(uint32_t)));
+
+    bool find=false;
+    size_t cnt=0;
+    while(!find) {
+        CUDA_CHECK(cudaMemset(gpu_atom_pos, 0, sizeof(uint32_t)));
+        kernel_jump<<<sm_count, 128>>>(report, kangaroos, jumptable_gpu, gpuOutput, gpu_output_idx, gpu_atom_pos, gpuCurve, num_kangaroo/GRP_INV_SIZE);
+        CUDA_CHECK(cudaDeviceSynchronize());
+        CGBN_CHECK(report);
+        CUDA_CHECK(cudaMemcpy(&atom_pos, gpu_atom_pos, sizeof(uint32_t), cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(output, gpuOutput, atom_pos * sizeof(Kangaroo), cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(output_idx, gpu_output_idx, atom_pos * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+        for (size_t i = 0; i < atom_pos; i++) {
+            auto ret = table.addPoint(output[i]);
+            if (ret == 1) {
+                find = true;
+                break;
+            } else if (ret != 0) {
+                Kangaroo ka;
+                ka.herd = output[i].herd;
+                shuffle_point(ka, range_size);
+                CUDA_CHECK(cudaMemcpy(kangaroos+output_idx[i], &ka, sizeof(Kangaroo), cudaMemcpyHostToDevice));
+            }
+        }
+        cnt += num_kangaroo * NB_RUN;
+    }
+    printf("cnt: %lu\n", cnt);
 }
 
