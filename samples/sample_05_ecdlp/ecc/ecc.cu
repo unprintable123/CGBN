@@ -120,7 +120,7 @@ __device__ __forceinline__ void point_set(env_t env, ECPointGPU &r, const ECPoin
 template<class env_t>
 __device__ __forceinline__ void mont_add(env_t env, typename env_t::cgbn_t &r, const typename env_t::cgbn_t &a, const typename env_t::cgbn_t &b, const CurveGPU &curve) {
   auto carry = cgbn_add(env, r, a, b);
-  if (carry)
+  if (carry || cgbn_compare(env, r, curve.p) >= 0)
   {
     cgbn_sub(env, r, r, curve.p);
   }
@@ -136,13 +136,19 @@ __device__ __forceinline__ void mont_sub(env_t env, typename env_t::cgbn_t &r, c
 }
 
 template<class env_t>
-__device__ __forceinline__ void mont_mul(env_t env, typename env_t::cgbn_t &r, const typename env_t::cgbn_t &a, const typename env_t::cgbn_t &b, const CurveGPU &curve) { 
+__device__ __forceinline__ void mont_mul(env_t env, typename env_t::cgbn_t &r, const typename env_t::cgbn_t &a, const typename env_t::cgbn_t &b, const CurveGPU &curve) {
   cgbn_mont_mul(env, r, a, b, curve.p, curve.np0);
+  if (cgbn_compare(env, r, curve.p) >= 0) {
+    cgbn_sub(env, r, r, curve.p);
+  }
 }
 
 template<class env_t>
 __device__ __forceinline__ void mont_sqr(env_t env, typename env_t::cgbn_t &r, const typename env_t::cgbn_t &a, const CurveGPU &curve) {
   cgbn_mont_sqr(env, r, a, curve.p, curve.np0);
+  if (cgbn_compare(env, r, curve.p) >= 0) {
+    cgbn_sub(env, r, r, curve.p);
+  }
 }
 
 template<class env_t>

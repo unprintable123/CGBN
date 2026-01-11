@@ -13,6 +13,7 @@ def run_kangaroo(Q, P, order=None, bound=None, num_retry=3):
     assert a1 == a2 == a3 == 0
     inp = f"{p} {a4} {a6} {order} {P.x()} {P.y()} {Q.x()} {Q.y()} {bound}\n"
     print(f"Running kangaroo with {bound.bit_length()} bits...")
+    print(inp)
     ret = None
     for _ in range(num_retry):
         try:
