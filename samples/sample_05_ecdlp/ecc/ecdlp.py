@@ -6,6 +6,7 @@ def run_kangaroo(Q, P, order=None, bound=None, num_retry=3):
     E = P.curve()
     if order is None:
         order = P.order()
+    assert order % 2 == 1
     if bound is None:
         bound = order
     p = E.base_ring().characteristic()
@@ -18,7 +19,7 @@ def run_kangaroo(Q, P, order=None, bound=None, num_retry=3):
     wt2 = walltime()
     for _ in range(num_retry):
         try:
-            ret = check_output("bash -c './kangaroo_gpu'", input=inp.encode(), shell=True).decode()
+            ret = check_output("./kangaroo_gpu", input=inp.encode(), shell=True).decode()
             assert "Solution:" in ret
         except Exception as e:
             print(e)
@@ -74,10 +75,7 @@ def ecdlp_weierstrass(Q, P, order, max_bound, factors, num_retry=3):
     MOD = prod(ms) # k = k0 + ? * MOD
     P1 = P * MOD
     Q1 = Q - k0 * P
-    print(k0, k%MOD)
-    assert Q1 == P1 * (k//MOD)
-    k1 = ecdlp_generic(Q1, P1, order, cur_bound+1, num_retry)
-    print(k1)
+    k1 = ecdlp_generic(Q1, P1, order//MOD, cur_bound+1, num_retry)
     return k0 + k1 * MOD
 
 def ecdlp(Q, P, order=None, bounds=None, factors=None, num_retry=3):
@@ -96,6 +94,7 @@ def ecdlp(Q, P, order=None, bounds=None, factors=None, num_retry=3):
     if factors is None:
         factors = list(factor(order))
     assert (P*order).is_zero()
+    assert order == prod([p**n for p, n in factors])
     factors_fixed = []
     for p, n in factors:
         while (P*(order//p)).is_zero():
