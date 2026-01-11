@@ -4,7 +4,7 @@
 
 #include "ecc.cu"
 
-constexpr uint32_t DP_SIZE = 15;
+constexpr uint32_t DP_SIZE = 14;
 constexpr uint32_t DP_MASK = (1 << DP_SIZE) - 1;
 constexpr uint32_t MAX_FOUND = 1 << 18;
 constexpr uint32_t NB_RUN = 512;
@@ -54,11 +54,7 @@ void load_uint128(uint128_t& dest, mpz_t &src, bool use_sgn=false) {
 
 struct Uint128Hasher {
     std::size_t operator()(const std::array<uint32_t, 4>& arr) const {
-        std::size_t h = 0;
-        for (uint32_t x : arr) {
-            h ^= std::hash<uint32_t>{}(x) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        }
-        return h;
+        return ((std::size_t)arr[1] << 32) | (std::size_t)arr[2];
     }
 };
 
@@ -321,8 +317,8 @@ void read_curve() {
     mpz_set_str(order, "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141", 16);
     G.to_mont_(param);
 
-    mpz_set_str(max_offset, "ffffffffffffffff", 16);
-    point_mul(target, G, 0x2ca6a807c356f637L, param);
+    mpz_set_str(max_offset, "ffffffffffffff", 16);
+    point_mul(target, G, 0x2ca6a80356f637L, param);
 
     assert(mpz_cmp(max_offset, order) < 0);
 }
@@ -455,8 +451,14 @@ int main()
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
     auto sm_count = prop.multiProcessorCount;
-    auto num_kangaroo = sm_count * (128 / TPI) * GRP_INV_SIZE;
-    printf("num_kangaroo: %d\n", num_kangaroo);
+    uint32_t TPB;
+    if (mpz_sizeinbase(max_offset, 2) <= 58) {
+        TPB = 128;
+    } else {
+        TPB = 256;
+    }
+    auto num_kangaroo = sm_count * (TPB / TPI) * GRP_INV_SIZE;
+    printf("num_kangaroo: %d, tpb: %d\n", num_kangaroo, TPB);
     init();
     init_jumptable(jumptable, 64);
 
@@ -502,7 +504,7 @@ int main()
     size_t cnt=0;
     while(!find) {
         CUDA_CHECK(cudaMemset(gpu_atom_pos, 0, sizeof(uint32_t)));
-        kernel_jump<<<sm_count, 128>>>(report, kangaroos, jumptable_gpu, gpuOutput, gpu_output_idx, gpu_atom_pos, gpuCurve, num_kangaroo/GRP_INV_SIZE);
+        kernel_jump<<<sm_count, TPB>>>(report, kangaroos, jumptable_gpu, gpuOutput, gpu_output_idx, gpu_atom_pos, gpuCurve, num_kangaroo/GRP_INV_SIZE);
         CUDA_CHECK(cudaDeviceSynchronize());
         CGBN_CHECK(report);
         CUDA_CHECK(cudaMemcpy(&atom_pos, gpu_atom_pos, sizeof(uint32_t), cudaMemcpyDeviceToHost));
