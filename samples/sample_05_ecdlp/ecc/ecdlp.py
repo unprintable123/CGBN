@@ -15,13 +15,17 @@ def run_kangaroo(Q, P, order=None, bound=None, num_retry=3):
     print(f"Running kangaroo with {bound.bit_length()} bits...")
     print(inp)
     ret = None
+    wt2 = walltime()
     for _ in range(num_retry):
         try:
-            ret = check_output(["./kangaroo_gpu"], input=inp.encode()).decode()
+            ret = check_output("bash -c './kangaroo_gpu'", input=inp.encode(), shell=True).decode()
             assert "Solution:" in ret
         except Exception as e:
+            print(e)
             continue
     assert ret is not None, "Kangaroo failed"
+    print(ret)
+    print(f"Finished in {walltime(wt2)}s")
     k = ret.split("Solution:")[1]
     k = k.split("\n")[0]
     return int(k, 16)
@@ -70,7 +74,10 @@ def ecdlp_weierstrass(Q, P, order, max_bound, factors, num_retry=3):
     MOD = prod(ms) # k = k0 + ? * MOD
     P1 = P * MOD
     Q1 = Q - k0 * P
+    print(k0, k%MOD)
+    assert Q1 == P1 * (k//MOD)
     k1 = ecdlp_generic(Q1, P1, order, cur_bound+1, num_retry)
+    print(k1)
     return k0 + k1 * MOD
 
 def ecdlp(Q, P, order=None, bounds=None, factors=None, num_retry=3):
@@ -125,18 +132,20 @@ def ecdlp(Q, P, order=None, bounds=None, factors=None, num_retry=3):
 
 if __name__ == "__main__":
     # p = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f
-    p = random_prime(2**256-1, proof=False)
+    # p = random_prime(2**256-1, proof=False)
+    p = 30030913657602533340298404660004962422554898040624558853564934900483682241069
     K = GF(p)
-    E = EllipticCurve(K, [randint(0, 65536), randint(0, 65536), randint(0, 65536), randint(0, 65536), randint(0, 65536)])
+    # E = EllipticCurve(K, [randint(0, 65536), randint(0, 65536), randint(0, 65536), randint(0, 65536), randint(0, 65536)])
+    E = EllipticCurve(K, [6237,54236789])
     order = E.order()
     factors = list(factor(order))
     print(E)
     print(E.order().factor())
     G = E.random_point()
-    k = randint(0, 2**64)
+    k = randint(0, 2**78)
     print(k, G)
     wt = walltime()
-    k2 = ecdlp(k*G, G, order=order, bounds=2**64, factors=factors)
+    k2 = ecdlp(k*G, G, order=order, bounds=2**78, factors=factors)
     print(f'Found in {walltime(wt)}s')
     assert k == k2
 
