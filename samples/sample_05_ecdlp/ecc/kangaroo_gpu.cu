@@ -304,23 +304,40 @@ __global__ void kernel_jump(cgbn_error_report_t *report, Kangaroo *kangaroos, Ju
     }
 }
 
+void input_mpz(const char *name, mpz_t &x) {
+    printf("%s: ", name);
+    gmp_scanf("%Zi", &x);
+}
+
 void read_curve() {
     mpz_inits(order, max_offset, mid, NULL);
     // y^2 = x^3 + 7
-    mpz_set_ui(param.a, 0);
-    mpz_set_ui(param.b, 7);
-    mpz_set_str(param.p, "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f", 16);
+    // mpz_set_ui(param.a, 0);
+    // mpz_set_ui(param.b, 7);
+    // mpz_set_str(param.p, "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f", 16);
+    input_mpz("p", param.p);
+    input_mpz("a", param.a);
+    input_mpz("b", param.b);
+    input_mpz("order", order);
     init_param(param);
 
-    mpz_set_str(G.x, "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798", 16);
-    mpz_set_str(G.y, "483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8", 16);
-    mpz_set_str(order, "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141", 16);
+    // mpz_set_str(G.x, "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798", 16);
+    // mpz_set_str(G.y, "483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8", 16);
+    // mpz_set_str(order, "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141", 16);
+    input_mpz("Gx", G.x);
+    input_mpz("Gy", G.y);
     G.to_mont_(param);
+    ECPoint P;
+    point_mul(P, G, order, param);
+    assert(P.z==0);
 
-    mpz_set_str(max_offset, "ffffffffffffff", 16);
-    point_mul(target, G, 0x2ca6a80356f637L, param);
+    // point_mul(target, G, 0x2ca6a80356f637L, param);
+    input_mpz("Qx", target.x);
+    input_mpz("Qy", target.y);
+    // mpz_set_str(max_offset, "ffffffffffffff", 16);
+    input_mpz("bound", max_offset);
 
-    assert(mpz_cmp(max_offset, order) < 0);
+    assert(mpz_cmp(max_offset, order) <= 0);
 }
 
 
