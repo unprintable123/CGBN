@@ -2,7 +2,7 @@
 #include <math.h>
 #include <unordered_map>
 
-#include "ecc.cu"
+#include "ecc/ecc.cu"
 
 constexpr uint32_t DP_SIZE = 14;
 constexpr uint32_t DP_MASK = (1 << DP_SIZE) - 1;

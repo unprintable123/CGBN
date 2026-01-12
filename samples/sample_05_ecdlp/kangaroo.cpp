@@ -2,8 +2,8 @@
 #include <math.h>
 #include <unordered_map>
 
-#include "ecc.h"
-#include "../../utility/cpu_support.h"
+#include "ecc/ecc.h"
+#include "../utility/cpu_support.h"
 
 constexpr uint32_t DP_SIZE = 10;
 constexpr uint32_t DP_MASK = (1 << DP_SIZE) - 1;

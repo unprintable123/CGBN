@@ -44,4 +44,5 @@ turing:
 ampere: 
 	nvcc $(INC) $(LIB) -I../../include -arch=sm_80 modinv_odd.cu -o mo -lgmp
 	nvcc $(INC) $(LIB) -I../../include -arch=sm_80 modinv_odd_faster.cu -o mo_faster -lgmp
+	nvcc $(INC) $(LIB) -O3 -I../../include -arch=sm_80 modinv_odd_yang.cu -o mo_yang -lgmp
 

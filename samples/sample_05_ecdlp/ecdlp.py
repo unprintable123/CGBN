@@ -141,10 +141,10 @@ if __name__ == "__main__":
     print(p, E.ainvs())
     print(E.order().factor())
     G = E.random_point()
-    k = randint(0, 2**242)
+    k = randint(0, 2**240)
     print(k, G.xy())
     wt = walltime()
-    k2 = ecdlp(k*G, G, order=order, bounds=2**242, factors=factors)
+    k2 = ecdlp(k*G, G, order=order, bounds=2**240, factors=factors)
     print(f'Found in {walltime(wt)}s')
     assert k == k2
 

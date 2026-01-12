@@ -1,4 +1,4 @@
-#include "ecc.h"
+#include "ecc/ecc.h"
 
 
 int main()

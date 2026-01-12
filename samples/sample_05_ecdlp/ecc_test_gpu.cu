@@ -1,6 +1,6 @@
-#include "ecc.cu"
+#include "ecc/ecc.cu"
 
-#define INSTANCES 128000
+#define INSTANCES 100000
 
 ECParameters param;
 ECPoint G, target, target_inv;
@@ -47,6 +47,8 @@ void verify_results(instance_t *instances, uint32_t count) {
     instances[i].A.to_point(P);
     instances[i].B.to_point(Q);
     instances[i].C.to_point(R);
+    // point_double(P, P, param);
+    point_mul(P, P, 12, param);
     point_add(P, P, Q, param);
     if (!(P==R)) {
       printf("gpu kernel failed on instance %d\n", i);
@@ -65,7 +67,7 @@ __global__ void kernel_point_add(cgbn_error_report_t *report, instance_t *instan
 
   context_t          bn_context(cgbn_report_monitor, report, instance);   // construct a context
   env_t              bn_env(bn_context);                                  // construct an environment for 1024-bit math
-  ECPointGPU A[GRP_INV_SIZE], B[GRP_INV_SIZE];
+  ECPointGPU A, B;
   CurveGPU curve;
   cgbn_load(bn_env, curve.p, &(curve_->p));
   cgbn_load(bn_env, curve.a, &(curve_->a));
@@ -75,20 +77,26 @@ __global__ void kernel_point_add(cgbn_error_report_t *report, instance_t *instan
   cgbn_load(bn_env, curve._r3, &(curve_->_r3));
   curve.np0 = curve_->np0;
 
-  for (int i = 0; i < GRP_INV_SIZE; i++) {
-    load_point(bn_env, A[i], &(instances[instance*GRP_INV_SIZE+i].A));
-    load_point(bn_env, B[i], &(instances[instance*GRP_INV_SIZE+i].B));
-  }
+  load_point(bn_env, A, &(instances[instance].A));
+  load_point(bn_env, B, &(instances[instance].B));
 
-  batch_point_add(bn_env, A, A, B, curve);
+  ECPointExtGPU A_ext(bn_env, A, curve), B_ext(bn_env, B, curve);
 
-  for (int i = 0; i < GRP_INV_SIZE; i++)
-    save_point(bn_env, &(instances[instance*GRP_INV_SIZE+i].C), A[i]);
+  env_t::cgbn_t n;
+  cgbn_set_ui32(bn_env, n, 6);
+  point_mul(bn_env, A_ext, A_ext, n, curve);
+  point_add(bn_env, A_ext, A_ext, B_ext, curve);
+  proj_point(bn_env, A, A_ext, curve);
+
+  point_double(bn_env, A, A, curve);
+  cgbn_sub(bn_env, B.y, curve.p, B.y);
+  point_add(bn_env, A, A, B, curve);
+
+  save_point(bn_env, &(instances[instance].C), A);
 }
 
 
 int main() {
-  static_assert(INSTANCES % GRP_INV_SIZE == 0, "GRP_INV_SIZE must divide INSTANCES");
   read_curve();
   instance_t          *instances, *gpuInstances;
   cgbn_error_report_t *report;
@@ -112,7 +120,7 @@ int main() {
   
   printf("Running GPU kernel ...\n");
   // launch with 32 threads per instance, 128 threads (4 instances) per block
-  kernel_point_add<<<((INSTANCES/GRP_INV_SIZE)+(128/TPI-1))/(128/TPI), 128>>>(report, gpuInstances, gpuCurve, INSTANCES/GRP_INV_SIZE);
+  kernel_point_add<<<(INSTANCES+(128/TPI-1))/(128/TPI), 128>>>(report, gpuInstances, gpuCurve, INSTANCES);
 
   // error report uses managed memory, so we sync the device (or stream) and check for cgbn errors
   CUDA_CHECK(cudaDeviceSynchronize());
