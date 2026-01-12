@@ -469,10 +469,15 @@ int main()
     CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
     auto sm_count = prop.multiProcessorCount;
     uint32_t TPB;
-    if (mpz_sizeinbase(max_offset, 2) <= 58) {
+    auto v2 = mpz_sizeinbase(max_offset, 2);
+    if (v2 <= 56) {
         TPB = 128;
-    } else {
+    } else if (v2 <= 62) {
         TPB = 256;
+    } else if (v2 <= 66) {
+        TPB = 384;
+    } else {
+        TPB = 512;
     }
     auto num_kangaroo = sm_count * (TPB / TPI) * GRP_INV_SIZE;
     printf("num_kangaroo: %d, tpb: %d\n", num_kangaroo, TPB);
