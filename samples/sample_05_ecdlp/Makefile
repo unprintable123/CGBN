@@ -18,11 +18,14 @@ pick:
 	@echo "   make ampere"
 	@echo
 
-
+clean:
+	rm -f ecc_test kangaroo_test add_test kangaroo_gpu
 
 ampere: 
 	g++ $(INC) $(LIB) -O3 ecc_test.cpp -o ecc_test -lgmp
 	g++ $(INC) $(LIB) -O3 kangaroo.cpp -o kangaroo_test -lgmp
-	nvcc $(INC) $(LIB) -O3 -I../../include -arch=sm_80 ecc_test_gpu2.cu -o add_test -lgmp
-	nvcc $(INC) $(LIB) -O3 -I../../include -arch=sm_80 kangaroo_gpu.cu -o kangaroo_gpu -lgmp
+	nvcc $(INC) $(LIB) -O3 -I../../include -arch=sm_86 ecc_test_gpu2.cu -o add_test -lgmp
+	nvcc $(INC) $(LIB) -O3 -I../../include -arch=sm_86 kangaroo_gpu.cu -o kangaroo_gpu -lgmp
 
+ada:
+	nvcc $(INC) $(LIB) -O3 -I../../include -arch=sm_89 kangaroo_gpu.cu -o kangaroo_gpu -lgmp
