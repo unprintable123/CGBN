@@ -131,21 +131,20 @@ def ecdlp(Q, P, order=None, bounds=None, factors=None, num_retry=3):
 
 
 if __name__ == "__main__":
-    # p = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f
     # p = random_prime(2**256-1, proof=False)
-    p = 30030913657602533340298404660004962422554898040624558853564934900483682241069
+    p = 31178164062153940559872708210370788695655545164982346174757263365069272345209
     K = GF(p)
-    # E = EllipticCurve(K, [randint(0, 65536), randint(0, 65536), randint(0, 65536), randint(0, 65536), randint(0, 65536)])
-    E = EllipticCurve(K, [6237,54236789])
+    # E = EllipticCurve(K, [randint(0, 2**64), randint(0, 2**64), randint(0, 2**64), randint(0, 2**64), randint(0, 2**64)])
+    E = EllipticCurve(K, [7114606877311793320, 15415720712719118310, 8211910969967105002, 17068079946103169765, 5460482550556951526])
     order = E.order()
     factors = list(factor(order))
-    print(E)
+    print(p, E.ainvs())
     print(E.order().factor())
     G = E.random_point()
-    k = randint(0, 2**78)
-    print(k, G)
+    k = randint(0, 2**242)
+    print(k, G.xy())
     wt = walltime()
-    k2 = ecdlp(k*G, G, order=order, bounds=2**78, factors=factors)
+    k2 = ecdlp(k*G, G, order=order, bounds=2**242, factors=factors)
     print(f'Found in {walltime(wt)}s')
     assert k == k2
 
