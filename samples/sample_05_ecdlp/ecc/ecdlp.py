@@ -21,6 +21,7 @@ def run_kangaroo(Q, P, order=None, bound=None, num_retry=3):
         try:
             ret = check_output("./kangaroo_gpu", input=inp.encode(), shell=True).decode()
             assert "Solution:" in ret
+            break
         except Exception as e:
             print(e)
             continue
