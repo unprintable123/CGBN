@@ -543,6 +543,6 @@ int main()
         double miliseconds = elapsed.count() * 1000;
         printf("time: %.2f ms\n", miliseconds);
         double ops_per_ms = ((double)cnt / miliseconds) / 1000.0;
-        printf("Mops/s: %.2f\n", ops_per_ms);
+        printf("Mops: %.2f\n", ops_per_ms);
     }
 }
