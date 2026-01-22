@@ -105,7 +105,7 @@ def dlp(target, g, order=None, bounds=None, known_factors=None, num_retry=3):
     assert g ** order == 1
     known_primes.sort()
     for p in known_primes:
-        while (g ** (order // p)) == 1:
+        while order % p == 0 and (g ** (order // p)) == 1:
             order = order // p
     assert g ** order == 1
     factors = []

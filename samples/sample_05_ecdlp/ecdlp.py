@@ -98,7 +98,7 @@ def ecdlp(Q, P, order=None, bounds=None, factors=None, num_retry=3):
     assert order == prod([p**n for p, n in factors])
     factors_fixed = []
     for p, n in factors:
-        while (P*(order//p)).is_zero():
+        while order % p == 0 and (P*(order//p)).is_zero():
             order = order // p
             n -= 1
         if n > 0:
