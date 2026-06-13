@@ -7,6 +7,9 @@ ifndef GMP_HOME
   LIB :=
 endif
 
+SM ?= 86
+NVCCFLAGS ?= -O3 -I../../include -arch=sm_$(SM)
+
 pick:
 	@echo
 	@echo Please run one of the following:
@@ -19,7 +22,7 @@ pick:
 	@echo
 
 clean:
-	rm -f ecc_test kangaroo_test add_test kangaroo_gpu
+	rm -f ecc_test kangaroo_test add_test kangaroo_gpu kangaroo_bench
 
 ampere: 
 	g++ $(INC) $(LIB) -O3 ecc_test.cpp -o ecc_test -lgmp
@@ -29,3 +32,6 @@ ampere:
 
 ada:
 	nvcc $(INC) $(LIB) -O3 -I../../include -arch=sm_89 kangaroo_gpu.cu -o kangaroo_gpu -lgmp
+
+kangaroo_bench:
+	nvcc $(INC) $(LIB) $(NVCCFLAGS) -DKANGAROO_BENCH kangaroo_gpu.cu -o kangaroo_bench -lgmp

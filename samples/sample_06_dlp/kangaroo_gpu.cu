@@ -9,6 +9,8 @@ constexpr uint32_t DP_SIZE = 15;
 constexpr uint32_t DP_MASK = (1 << DP_SIZE) - 1;
 constexpr uint32_t MAX_FOUND = 1 << 18;
 constexpr uint32_t NB_RUN = 16384;
+constexpr uint32_t JUMP_TABLE_BITS = 6;
+constexpr uint32_t JUMP_TABLE_SIZE = 1U << JUMP_TABLE_BITS;
 typedef std::array<uint32_t, 4> uint128_t;
 
 enum Herd {
@@ -90,6 +92,11 @@ struct Kangaroo
     cgbn_mem_t<NBITS> offset;
     Herd herd;
 };
+
+static_assert(sizeof(Curve) % sizeof(uint32_t) == 0, "Curve must be word-copyable");
+static_assert(sizeof(JumpEntry) % sizeof(uint32_t) == 0, "JumpEntry must be word-copyable");
+constexpr uint32_t CURVE_WORDS = sizeof(Curve) / sizeof(uint32_t);
+constexpr uint32_t JUMP_TABLE_WORDS = (JUMP_TABLE_SIZE * sizeof(JumpEntry)) / sizeof(uint32_t);
 
 __device__ __forceinline__ void mont_pow_gpu(env_t env, env_t::cgbn_t &r, const env_t::cgbn_t &a, const env_t::cgbn_t &n, const CurveGPU &curve) {
     env_t::cgbn_t base, exp;
@@ -207,8 +214,10 @@ __device__ __forceinline__ void save_output(env_t env, Kangaroo *output, uint32_
     assert(pos < MAX_FOUND);
     cgbn_store(env, &(output[pos].P), P);
     cgbn_store(env, &(output[pos].offset), offset);
-    output[pos].herd = herd;
-    output_idx[pos] = idx;
+    if (is_main) {
+        output[pos].herd = herd;
+        output_idx[pos] = idx;
+    }
 }
 
 __global__ void kernel_create_kangaroos(cgbn_error_report_t *report, Kangaroo *kangaroos, cgbn_mem_t<NBITS> *G_, cgbn_mem_t<NBITS> *G_inv_, cgbn_mem_t<NBITS> *target_, cgbn_mem_t<NBITS> *target_inv_, Curve *curve_, size_t count) {
@@ -262,38 +271,50 @@ __global__ void kernel_jump(cgbn_error_report_t *report, Kangaroo *kangaroos, Ju
     int32_t instance;
 
     instance=(blockIdx.x*blockDim.x + threadIdx.x)/TPI;
+
+    __shared__ uint32_t curve_words[CURVE_WORDS];
+    __shared__ uint32_t jumptable_words[JUMP_TABLE_WORDS];
+    uint32_t *src_curve = reinterpret_cast<uint32_t *>(curve_);
+    uint32_t *src_jumptable = reinterpret_cast<uint32_t *>(jumptable_);
+    for (uint32_t i = threadIdx.x; i < CURVE_WORDS; i += blockDim.x) {
+        curve_words[i] = src_curve[i];
+    }
+    for (uint32_t i = threadIdx.x; i < JUMP_TABLE_WORDS; i += blockDim.x) {
+        jumptable_words[i] = src_jumptable[i];
+    }
+    __syncthreads();
+
     if(instance>=count)
         return;
     
     context_t          bn_context(cgbn_report_monitor, report, instance);
     env_t              bn_env(bn_context);
     CurveGPU curve;
-    cgbn_load(bn_env, curve.p, &(curve_->p));
-    cgbn_load(bn_env, curve.a, &(curve_->a));
-    cgbn_load(bn_env, curve.b, &(curve_->b));
-    cgbn_load(bn_env, curve._r, &(curve_->_r));
-    cgbn_load(bn_env, curve._r2, &(curve_->_r2));
-    cgbn_load(bn_env, curve._r3, &(curve_->_r3));
-    curve.np0 = curve_->np0;
+    Curve *shared_curve = reinterpret_cast<Curve *>(curve_words);
+    JumpEntry *shared_jumptable = reinterpret_cast<JumpEntry *>(jumptable_words);
+    cgbn_load(bn_env, curve.p, &(shared_curve->p));
+    cgbn_load(bn_env, curve.a, &(shared_curve->a));
+    cgbn_load(bn_env, curve.b, &(shared_curve->b));
+    cgbn_load(bn_env, curve._r, &(shared_curve->_r));
+    cgbn_load(bn_env, curve._r2, &(shared_curve->_r2));
+    cgbn_load(bn_env, curve._r3, &(shared_curve->_r3));
+    curve.np0 = shared_curve->np0;
 
     env_t::cgbn_t Ps;
     env_t::cgbn_t offset;
     Herd herd;
-    JumpEntryGPU jumptable[32];
     cgbn_load(bn_env, Ps, &(kangaroos[instance].P));
     cgbn_load(bn_env, offset, &(kangaroos[instance].offset));
     herd = kangaroos[instance].herd;
-
-    for (int i = 0; i < 32; i++) {
-        cgbn_load(bn_env, jumptable[i].point, &(jumptable_[i].point));
-        cgbn_load(bn_env, jumptable[i].offset, &(jumptable_[i].offset));
-    }
+    env_t::cgbn_t jump_point, jump_offset;
 
     for (int nr = 0; nr < NB_RUN; nr++) {
         auto &P = Ps;
-        uint32_t jmp = cgbn_get_ui32(bn_env, P) >> (32 - 5);
-        mont_mul(bn_env, P, P, jumptable[jmp].point, curve);
-        cgbn_add(bn_env, offset, offset, jumptable[jmp].offset);
+        uint32_t jmp = cgbn_get_ui32(bn_env, P) >> (32 - JUMP_TABLE_BITS);
+        cgbn_load(bn_env, jump_point, &(shared_jumptable[jmp].point));
+        cgbn_load(bn_env, jump_offset, &(shared_jumptable[jmp].offset));
+        mont_mul(bn_env, P, P, jump_point, curve);
+        cgbn_add(bn_env, offset, offset, jump_offset);
 
         if ((cgbn_get_ui32(bn_env, P) & DP_MASK) == 0) {
             save_output(bn_env, output, output_idx, atom_pos, instance, P, offset, herd);
@@ -453,7 +474,7 @@ void init() {
 int main()
 {
     HashTable table;
-    JumpEntry jumptable[64];
+    JumpEntry jumptable[JUMP_TABLE_SIZE];
     cgbn_error_report_t *report;
     read_curve();
 
@@ -465,10 +486,10 @@ int main()
     auto num_kangaroo = sm_count * (TPB / TPI);
     printf("num_kangaroo: %d, tpb: %d\n", num_kangaroo, TPB);
     init();
-    init_jumptable(jumptable, 32);
+    init_jumptable(jumptable, JUMP_TABLE_SIZE);
 
-    CUDA_CHECK(cudaMalloc(&jumptable_gpu, 64 * sizeof(JumpEntry)));
-    CUDA_CHECK(cudaMemcpy(jumptable_gpu, jumptable, 64 * sizeof(JumpEntry), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMalloc(&jumptable_gpu, JUMP_TABLE_SIZE * sizeof(JumpEntry)));
+    CUDA_CHECK(cudaMemcpy(jumptable_gpu, jumptable, JUMP_TABLE_SIZE * sizeof(JumpEntry), cudaMemcpyHostToDevice));
     CUDA_CHECK(cgbn_error_report_alloc(&report));
 
     Curve *curve = new Curve(param);
