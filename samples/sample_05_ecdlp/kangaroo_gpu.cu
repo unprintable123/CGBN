@@ -2,6 +2,7 @@
 #include <cstring>
 #include <math.h>
 #include <unordered_map>
+#include <chrono>
 
 #include "ecc/ecc.cu"
 
@@ -725,6 +726,7 @@ int main()
     CUDA_CHECK(cudaMalloc(&gpu_output_idx, MAX_FOUND * sizeof(uint32_t)));
     CUDA_CHECK(cudaMalloc(&gpu_atom_pos, sizeof(uint32_t)));
 
+    auto start_time = std::chrono::high_resolution_clock::now();
     bool find=false;
     size_t cnt=0;
     while(!find) {
@@ -749,6 +751,15 @@ int main()
         }
         cnt += num_kangaroo * NB_RUN;
     }
+    auto end_time = std::chrono::high_resolution_clock::now();
     printf("cnt: %lu\n", cnt);
+    printf("table size: %lu\n", table.entries.size());
+    {
+        std::chrono::duration<double> elapsed = end_time - start_time;
+        double miliseconds = elapsed.count() * 1000;
+        printf("time: %.2f ms\n", miliseconds);
+        double ops_per_ms = ((double)cnt / miliseconds) / 1000.0;
+        printf("Mops: %.2f\n", ops_per_ms);
+    }
 }
 #endif
