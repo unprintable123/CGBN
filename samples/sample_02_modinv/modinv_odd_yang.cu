@@ -318,75 +318,13 @@ __global__ void kernel_modinv_odd(cgbn_error_report_t *report, instance_t *insta
   context_t          bn_context(cgbn_report_monitor, report, instance);   // construct a context
   env_t              bn_env(bn_context);                                  // construct an environment for 1024-bit math
   env_t::cgbn_t      m, r, v;                                       // define m, r, s, u, v as 1024-bit bignums
-  // env_t::cgbn_wide_t w;                                                   // define w as a wide (2048-bit) bignum
-  // uint32_t           np0;
-  // int32_t            k=0, carry, compare;
 
   cgbn_load(bn_env, m, &(instances[instance].m));
   cgbn_load(bn_env, v, &(instances[instance].x));
 
-  for (int i = 0; i < 5000; i++){
+  for (int i = 0; i < 1000; i++) {
     yang_modinv_odd(bn_env, r, v, m);
-    // x_modinv_odd_faster(bn_env, r, v, m);
-    // cgbn_modular_inverse(bn_env, r, v, m);
   }
-
-//   cgbn_set(bn_env, u, m);
-//   cgbn_set_ui32(bn_env, r, 0);
-//   cgbn_set_ui32(bn_env, s, 1);
-  
-//   while(true) {
-//     k++;
-//     if(cgbn_get_ui32(bn_env, u)%2==0) {
-//       cgbn_rotate_right(bn_env, u, u, 1);
-//       cgbn_add(bn_env, s, s, s);
-//     }
-//     else if(cgbn_get_ui32(bn_env, v)%2==0) {
-//       cgbn_rotate_right(bn_env, v, v, 1);
-//       cgbn_add(bn_env, r, r, r);
-//     }
-//     else {
-//       compare=cgbn_compare(bn_env, u, v);
-//       if(compare>0) {
-//         cgbn_add(bn_env, r, r, s);
-//         cgbn_sub(bn_env, u, u, v);
-//         cgbn_rotate_right(bn_env, u, u, 1);
-//         cgbn_add(bn_env, s, s, s);
-//       }
-//       else if(compare<0) {
-//         cgbn_add(bn_env, s, s, r);
-//         cgbn_sub(bn_env, v, v, u);
-//         cgbn_rotate_right(bn_env, v, v, 1);
-//         cgbn_add(bn_env, r, r, r);
-//       }
-//       else
-//         break;
-//     }
-//   }
-  
-//   if(!cgbn_equals_ui32(bn_env, u, 1)) 
-//     cgbn_set_ui32(bn_env, r, 0);
-//   else {  
-//     // last r update
-//     carry=cgbn_add(bn_env, r, r, r);
-//     if(carry==1) 
-//       cgbn_sub(bn_env, r, r, m);
-
-//     // clean up
-//     if(cgbn_compare(bn_env, r, m)>0)
-//       cgbn_sub(bn_env, r, r, m);
-//     cgbn_sub(bn_env, r, m, r);
-
-//     // faster cleanup, taking advantage of the built-in mont_reduce_wide.
-//     np0=-cgbn_binary_inverse_ui32(bn_env, cgbn_get_ui32(bn_env, m));
-//     cgbn_set(bn_env, w._low, r);
-//     cgbn_set_ui32(bn_env, w._high, 0);    
-//     cgbn_mont_reduce_wide(bn_env, r, w, m, np0);
-
-//     cgbn_shift_left(bn_env, w._low, r, 2*BITS-k);
-//     cgbn_shift_right(bn_env, w._high, r, k-BITS);
-//     cgbn_mont_reduce_wide(bn_env, r, w, m, np0);
-//   }
 
   cgbn_store(bn_env, &(instances[instance].inverse), r);
 }

@@ -27,6 +27,7 @@ IN THE SOFTWARE.
 #include <stdlib.h>
 #include <cuda.h>
 #include <gmp.h>
+#include <chrono>
 #include "cgbn/cgbn.h"
 #include "../utility/support.h"
 
@@ -42,8 +43,8 @@ IN THE SOFTWARE.
  
 
 // IMPORTANT:  DO NOT DEFINE TPI OR BITS BEFORE INCLUDING CGBN
-#define TPI 32
-#define BITS 1024
+#define TPI 4
+#define BITS 256
 #define INSTANCES 100000
 
 // Declare the instance type
@@ -110,69 +111,73 @@ __global__ void kernel_modinv_odd(cgbn_error_report_t *report, instance_t *insta
 
   context_t          bn_context(cgbn_report_monitor, report, instance);   // construct a context
   env_t              bn_env(bn_context);                                  // construct an environment for 1024-bit math
-  env_t::cgbn_t      m, r, s, u, v;                                       // define m, r, s, u, v as 1024-bit bignums
+  env_t::cgbn_t      m, r, s, u, v, v_orig;                                // define m, r, s, u, v as 1024-bit bignums
   env_t::cgbn_wide_t w;                                                   // define w as a wide (2048-bit) bignum
   uint32_t           np0;
   int32_t            k=0, carry, compare;
   
   cgbn_load(bn_env, m, &(instances[instance].m));
-  cgbn_load(bn_env, v, &(instances[instance].x));
+  cgbn_load(bn_env, v_orig, &(instances[instance].x));
 
-  cgbn_set(bn_env, u, m);
-  cgbn_set_ui32(bn_env, r, 0);
-  cgbn_set_ui32(bn_env, s, 1);
-  
-  while(true) {
-    k++;
-    if(cgbn_get_ui32(bn_env, u)%2==0) {
-      cgbn_rotate_right(bn_env, u, u, 1);
-      cgbn_add(bn_env, s, s, s);
-    }
-    else if(cgbn_get_ui32(bn_env, v)%2==0) {
-      cgbn_rotate_right(bn_env, v, v, 1);
-      cgbn_add(bn_env, r, r, r);
-    }
-    else {
-      compare=cgbn_compare(bn_env, u, v);
-      if(compare>0) {
-        cgbn_add(bn_env, r, r, s);
-        cgbn_sub(bn_env, u, u, v);
+  for (int i = 0; i < 1000; i++) {
+    cgbn_set(bn_env, u, m);
+    cgbn_set(bn_env, v, v_orig);
+    cgbn_set_ui32(bn_env, r, 0);
+    cgbn_set_ui32(bn_env, s, 1);
+    k = 0;
+    
+    while(true) {
+      k++;
+      if(cgbn_get_ui32(bn_env, u)%2==0) {
         cgbn_rotate_right(bn_env, u, u, 1);
         cgbn_add(bn_env, s, s, s);
       }
-      else if(compare<0) {
-        cgbn_add(bn_env, s, s, r);
-        cgbn_sub(bn_env, v, v, u);
+      else if(cgbn_get_ui32(bn_env, v)%2==0) {
         cgbn_rotate_right(bn_env, v, v, 1);
         cgbn_add(bn_env, r, r, r);
       }
-      else
-        break;
+      else {
+        compare=cgbn_compare(bn_env, u, v);
+        if(compare>0) {
+          cgbn_add(bn_env, r, r, s);
+          cgbn_sub(bn_env, u, u, v);
+          cgbn_rotate_right(bn_env, u, u, 1);
+          cgbn_add(bn_env, s, s, s);
+        }
+        else if(compare<0) {
+          cgbn_add(bn_env, s, s, r);
+          cgbn_sub(bn_env, v, v, u);
+          cgbn_rotate_right(bn_env, v, v, 1);
+          cgbn_add(bn_env, r, r, r);
+        }
+        else
+          break;
+      }
     }
-  }
-  
-  if(!cgbn_equals_ui32(bn_env, u, 1)) 
-    cgbn_set_ui32(bn_env, r, 0);
-  else {  
-    // last r update
-    carry=cgbn_add(bn_env, r, r, r);
-    if(carry==1) 
-      cgbn_sub(bn_env, r, r, m);
+    
+    if(!cgbn_equals_ui32(bn_env, u, 1)) 
+      cgbn_set_ui32(bn_env, r, 0);
+    else {  
+      // last r update
+      carry=cgbn_add(bn_env, r, r, r);
+      if(carry==1) 
+        cgbn_sub(bn_env, r, r, m);
 
-    // clean up
-    if(cgbn_compare(bn_env, r, m)>0)
-      cgbn_sub(bn_env, r, r, m);
-    cgbn_sub(bn_env, r, m, r);
+      // clean up
+      if(cgbn_compare(bn_env, r, m)>0)
+        cgbn_sub(bn_env, r, r, m);
+      cgbn_sub(bn_env, r, m, r);
 
-    // faster cleanup, taking advantage of the built-in mont_reduce_wide.
-    np0=-cgbn_binary_inverse_ui32(bn_env, cgbn_get_ui32(bn_env, m));
-    cgbn_set(bn_env, w._low, r);
-    cgbn_set_ui32(bn_env, w._high, 0);    
-    cgbn_mont_reduce_wide(bn_env, r, w, m, np0);
+      // faster cleanup, taking advantage of the built-in mont_reduce_wide.
+      np0=-cgbn_binary_inverse_ui32(bn_env, cgbn_get_ui32(bn_env, m));
+      cgbn_set(bn_env, w._low, r);
+      cgbn_set_ui32(bn_env, w._high, 0);    
+      cgbn_mont_reduce_wide(bn_env, r, w, m, np0);
 
-    cgbn_shift_left(bn_env, w._low, r, 2*BITS-k);
-    cgbn_shift_right(bn_env, w._high, r, k-BITS);
-    cgbn_mont_reduce_wide(bn_env, r, w, m, np0);
+      cgbn_shift_left(bn_env, w._low, r, 2*BITS-k);
+      cgbn_shift_right(bn_env, w._high, r, k-BITS);
+      cgbn_mont_reduce_wide(bn_env, r, w, m, np0);
+    }
   }
 
   cgbn_store(bn_env, &(instances[instance].inverse), r);
@@ -193,6 +198,8 @@ int main() {
   // create a cgbn_error_report for CGBN to report back errors
   CUDA_CHECK(cgbn_error_report_alloc(&report)); 
   
+  auto start = std::chrono::steady_clock::now();
+
   printf("Running GPU kernel ...\n");
   // launch with 32 threads per instance, 128 threads (4 instances) per block
   kernel_modinv_odd<<<(INSTANCES+3)/4, 128>>>(report, gpuInstances, INSTANCES);
@@ -200,6 +207,8 @@ int main() {
   // error report uses managed memory, so we sync the device (or stream) and check for cgbn errors
   CUDA_CHECK(cudaDeviceSynchronize());
   CGBN_CHECK(report);
+  auto end = std::chrono::steady_clock::now();
+  printf("GPU kernel completed in %.3f ms\n", std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()/1000.0);
     
   // copy the instances back from gpuMemory
   printf("Copying results back to CPU ...\n");
